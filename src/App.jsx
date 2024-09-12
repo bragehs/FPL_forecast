@@ -7,9 +7,6 @@ function App() {
       <p>
         nettsiden til verdens farligste mann
       </p>
-      <p>
-        Du kan endre koden i <code>src/App.jsx</code>
-      </p>
     </div>
   );
 }
