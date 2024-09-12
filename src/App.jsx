@@ -3,12 +3,9 @@ import "./App.css";
 function App() {
   return (
     <div className="card">
-      <h1>Hei!!!!!! 👋</h1>
+      <h1>Cumstink.com 👋</h1>
       <p>
-        Du kan se koden for dette prosjektet{" "}
-        <a href="https://github.com/bekk/prosjektutgangspunkt">
-          i repoet på GitHub
-        </a>
+        nettsiden til verdens farligste mann
       </p>
       <p>
         Du kan endre koden i <code>src/App.jsx</code>
