@@ -1,3 +1,5 @@
+import React, {useEffect, useState} from "react";
+import Papa from papaparse;
 import "./App.css";
 
 function App() {
@@ -6,7 +8,7 @@ function App() {
       <h1>Velkommen! 👋
       </h1>
       <p>
-        til min første nettside
+        til min første nettside!!!
       </p>
     </div>
   );
