@@ -31,5 +31,32 @@ function App() {
     fetchCsvData();
 }, []);
 }
+return (
+  <div className="App">
+    <h1>CSV Data Display</h1>
+    {csvData.length > 0 ? (
+      <table border="1" cellPadding="5" style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {Object.keys(csvData[0]).map((header, index) => (
+              <th key={index}>{header}</th> // Display CSV headers
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {csvData.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {Object.values(row).map((value, cellIndex) => (
+                <td key={cellIndex}>{value}</td> // Display CSV data cells
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <p>Loading data...</p> // Message while data is being loaded
+    )}
+  </div>
+);
 
 export default App;
