@@ -6,12 +6,18 @@ import "./App.css"; // Import CSS styles
 function App() {
   // State to hold CSV data
   const [csvData, setCsvData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // useEffect to fetch and parse the CSV file when the component mounts
   useEffect(() => {
     const fetchCsvData = async () => {
       try {
-        const response = await fetch("/data.csv"); // Fetch the CSV file
+        const response = await fetch("/archive/2021-2022.csv"); // Fetch the CSV file
+        if (!response.ok) {
+          throw new Error(`Failed to fetch CSV: ${response.statusText}`);
+        }
+
         const reader = response.body.getReader(); // Read the response body
         const decoder = new TextDecoder("utf-8"); // Create a decoder
         const result = await reader.read(); // Read the data
@@ -23,19 +29,33 @@ function App() {
           skipEmptyLines: true, // Skip empty lines
           complete: (result) => {
             setCsvData(result.data); // Save parsed data to state
+            setLoading(false);
+          },
+          error: (error) => {
+            throw new Error(`Error parsing CSV: ${error.message}`);
           },
         });
       } catch (error) {
-        console.error("Error fetching the CSV file:", error); // Handle errors
+        setError(error.message); // Handle errors
+        setLoading(false);
       }
     };
 
     fetchCsvData(); // Call the fetch function
   }, []); // Empty dependency array to run once on mount
+  
+  if (loading) {
+    return <p>Loading data...</p>;
+  }
+
+  if (error) {
+    return <p>Error loading data: {error}</p>;
+  }
 
   return (
     <div className="App"> {/* Main container */}
-      <h1>CSV Data Display</h1> {/* Title */}
+      <h1>Premier League Fixtures 2021-2022</h1> {/* Title */}
+      <div className="table-container"> {/* Scrollable container */}
       {csvData.length > 0 ? ( // Check if data is loaded
         <table border="1" cellPadding="5" style={{ borderCollapse: "collapse" }}> {/* Table */}
           <thead>
@@ -58,6 +78,7 @@ function App() {
       ) : (
         <p>Loading data...</p> // Loading message
       )}
+      </div>
     </div>
   );
 }
