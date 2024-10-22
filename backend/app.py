@@ -4,7 +4,7 @@ from fetch_data import fetch_premier_league_table
 
 
 app = Flask(__name__)
-CORS(app, origins=["https://hobby-prosjekt.vercel.app"])
+CORS(app)
 
 @app.route('/', methods=['GET'])
 
