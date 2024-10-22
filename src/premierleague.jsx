@@ -3,7 +3,7 @@ import axios from 'axios';
 
 const PremierLeagueTable = () => {
   console.log("PremierLeagueTable component is rendering");
-  
+
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const headers = [
@@ -15,7 +15,7 @@ const PremierLeagueTable = () => {
     axios.get('https://45ec-88-92-69-129.ngrok-free.app')
       .then(response => {
         console.log('Data fetched:', response.data);
-        setData(response.data.data);
+        setData(response.data);
         setLoading(false);
       })
       .catch(error => {
