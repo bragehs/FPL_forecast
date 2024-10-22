@@ -12,7 +12,7 @@ const PremierLeagueTable = () => {
     axios.get('https://45ec-88-92-69-129.ngrok-free.app')
       .then(response => {
         console.log('Data fetched:', response.data);
-        setData(response.data);
+        setData(response.data.data);
         setLoading(false);
       })
       .catch(error => {
