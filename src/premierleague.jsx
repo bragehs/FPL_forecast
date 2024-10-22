@@ -11,6 +11,7 @@ const PremierLeagueTable = () => {
   useEffect(() => {
     axios.get('https://45ec-88-92-69-129.ngrok-free.app')
       .then(response => {
+        console.log('Data fetched:', response.data);
         setData(response.data);
         setLoading(false);
       })
@@ -32,7 +33,7 @@ const PremierLeagueTable = () => {
         </tr>
         </thead>
       <tbody>
-        {data.map((row, index) => (
+        {Array.isArray(data) && data.map((row, index) => (
           <tr key={index}>
             {headers.map((key, i) => (
               <td key={i}>{row[key]}</td>
