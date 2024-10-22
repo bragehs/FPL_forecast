@@ -1,13 +1,12 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 from fetch_data import fetch_premier_league_table
-import pandas as pd
+
 
 app = Flask(__name__)
 CORS(app)
 
-
-@app.route('/')
+@app.route('/', methods=['GET'])
 
 def home():
     data = fetch_premier_league_table()
