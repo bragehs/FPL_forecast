@@ -14,7 +14,7 @@ const PremierLeagueTable = () => {
        
     axios.get('http://localhost:5000')
       .then(response => {
-        setData(response.data.data);
+        setData(response.data);
         setLoading(false);
       })
       .catch(error => {
