@@ -14,7 +14,7 @@ const PremierLeagueTable = () => {
        
     axios.get('https://efaa-2001-700-200-f120-c86f-570f-fc2a-29c5.ngrok-free.app')
       .then(response => {
-        setData(response.data);
+        setData(response.data.data);
         setLoading(false);
       })
       .catch(error => {
