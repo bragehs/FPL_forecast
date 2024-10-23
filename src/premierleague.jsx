@@ -7,7 +7,7 @@ const PremierLeagueTable = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const headers = [
-    'Rk', 'Squad', 'MP', 'W', 'D', 'L','Last 5', 'GF', 'GA', 'GD', 'Pts', 'xG', 'xGA', 'xGD', 'Pts/MP', 'Top Team Scorer', 'Goalkeeper', 'Attendance', 'Notes'
+    'Rk', 'Squad', 'MP', 'W', 'D', 'L','Last 5', 'Pts','GF', 'GA', 'GD', 'xG', 'xGA', 'xGD', 'Pts/MP', 'Top Team Scorer', 'Goalkeeper', 'Attendance', 'Notes'
 ];
 
   useEffect(() => {
