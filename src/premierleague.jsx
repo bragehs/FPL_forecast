@@ -12,7 +12,7 @@ const PremierLeagueTable = () => {
 
   useEffect(() => {
        
-    axios.get('https://9927-88-92-69-129.ngrok-free.app')
+    axios.get('http://localhost:5000')
       .then(response => {
         setData(response.data.data);
         setLoading(false);
