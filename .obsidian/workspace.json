@@ -170,6 +170,10 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "backend/predictor/final_data/val_sequences.pt",
+    "backend/predictor/final_data/train_sequences.pt",
+    "backend/predictor/final_data/test_sequences.pt",
+    "backend/predictor/final_data",
     "backend/predictor/eval.py",
     "backend/predictor/data/test_sequences.pt",
     "backend/predictor/run_training.ipynb",
@@ -177,10 +181,6 @@
     "backend/data/2024-25/gws/merged_gw.csv",
     "backend/data/2024-25/gws/merged_gw copy.csv",
     "backend/data/match_list.json.webloc",
-    "backend/predictor/__pycache__/scrape_fbref.cpython-311.pyc",
-    "backend/predictor/scrape_fbref.py",
-    "backend/util.py.webloc",
-    "backend/data/train_v8.csv",
     "PLAN.md"
   ]
 }
