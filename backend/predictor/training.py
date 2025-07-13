@@ -1,7 +1,8 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from model import LSTMEncoderOnly, AdvancedLSTM, TransformerEncoderOnly
+from model import AdvancedLSTM
 import os
 import numpy as np
 import random
@@ -13,6 +14,32 @@ def create_loss_weights(data, alpha=4.0, percentile=0.95):
     weights = 1 + alpha * dev / dev.max()
     weights = torch.clamp(weights, max=weight_cap)
     return weights
+
+class WeightedMSELoss(nn.Module):
+    def __init__(self, weight_ranges=[(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)]):
+        super().__init__()
+        self.weight_ranges = weight_ranges
+    
+    def forward(self, y_pred, y_true):
+        # Flatten tensors
+        y_pred_flat = y_pred.view(-1)
+        y_true_flat = y_true.view(-1)
+        
+        # Create weights based on target values
+        weights = torch.ones_like(y_true_flat)
+        
+        for min_val, max_val, weight in self.weight_ranges:
+            if max_val == float('inf'):
+                mask = y_true_flat >= min_val
+            else:
+                mask = (y_true_flat >= min_val) & (y_true_flat < max_val)
+            weights[mask] = weight
+        
+        # Calculate weighted MSE
+        mse = (y_pred_flat - y_true_flat) ** 2
+        weighted_mse = mse * weights
+        
+        return weighted_mse.mean()
 
 class Seq2SeqDataset(Dataset):
     def __init__(self, X, y, future_fd):
@@ -48,6 +75,7 @@ def train_model(
         learning_rate=1e-4,
         weight_decay=1e-5,
         batch_size=64,
+        weight_ranges=[(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)]
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -61,7 +89,7 @@ def train_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rate,
                                                     steps_per_epoch=len(train_loader), epochs=epochs)
-    criterion = torch.nn.MSELoss() 
+    criterion = WeightedMSELoss(weight_ranges=weight_ranges)
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
     # --- Training loop ---
@@ -121,6 +149,24 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
         'num_fc_layers': [1, 2, 3, 4],
         'batch_size': [32, 64, 128, 256],
+        'weight_ranges': [
+            # Standard weighting
+            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)],
+            # More aggressive high-value weighting
+            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 2.0), (6, 10, 4.0), (10, float('inf'), 7.0)],
+            # Conservative weighting
+            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.2), (6, 10, 2.0), (10, float('inf'), 3.0)],
+            # Moderate weighting
+            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.3), (6, 10, 2.5), (10, float('inf'), 4.0)],
+            # Very aggressive weighting
+            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 2.5), (6, 10, 5.0), (10, float('inf'), 10.0)],
+            # Balanced weighting
+            [(0, 2, 1.0), (2, 4, 1.1), (4, 6, 1.5), (6, 10, 2.5), (10, float('inf'), 4.5)],
+            # Different range splits
+            [(0, 3, 1.0), (3, 5, 1.3), (5, 8, 2.5), (8, 12, 4.0), (12, float('inf'), 6.0)],
+            # Focus on mid-range too
+            [(0, 2, 1.0), (2, 4, 1.4), (4, 6, 2.0), (6, 10, 3.5), (10, float('inf'), 5.5)]
+        ]
     }
     
     best_rmse = float('inf')
@@ -139,6 +185,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
             'dropout': random.choice(param_ranges['dropout']),
             'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
             'batch_size': random.choice(param_ranges['batch_size']),
+            'weight_ranges': random.choice(param_ranges['weight_ranges'])
         }
         
         print(f"\nTrial {trial+1}/{n_trials}")
@@ -154,7 +201,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
             num_fc_layers=params['num_fc_layers']
         )
         
-        # Train model1'
+        # Train model
         try:
             val_rmse = train_model(
                 model,
@@ -166,6 +213,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
                 weight_decay=params['weight_decay'],
                 batch_size=params['batch_size'],
                 epochs=epochs,
+                weight_ranges=params['weight_ranges']
             )
             
             results.append({**params, 'rmse': val_rmse})

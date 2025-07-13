@@ -170,6 +170,8 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "backend/predictor/eval.py",
+    "backend/predictor/data/test_sequences.pt",
     "backend/predictor/run_training.ipynb",
     "backend/data/2024-25/fixtures-kopi.csv",
     "backend/data/2024-25/gws/merged_gw.csv",
@@ -179,7 +181,6 @@
     "backend/predictor/scrape_fbref.py",
     "backend/util.py.webloc",
     "backend/data/train_v8.csv",
-    "best_model.pth",
     "PLAN.md"
   ]
 }
