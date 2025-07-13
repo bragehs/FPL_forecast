@@ -186,31 +186,3 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=20):
     print(f"Best RMSE: {best_rmse:.4f}")
     
     return best_params
-
-if __name__ == "__main__":
-    file_path = os.getcwd() + "/backend/predictor/data" # run from root
-    X_train, y_train = torch.load(file_path + "/train_sequences.pt", weights_only=True)
-    X_val, y_val = torch.load(file_path + "/val_sequences.pt", weights_only=True) 
-
-    print(f"Train sequences: {X_train.shape}, Targets: {y_train.shape}")
-
-    # Hyperparameter tuning
-    best_params = hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=15)
-
-    # Full training with best hyperparameters
-    print("\nTraining final model with best hyperparameters...")
-    #model = LSTMEncoderOnly(input_dim=26, hidden_dim=128, output_dim=1, num_layers=2, dropout=0.2)
-    #model = TransformerEncoderOnly(input_dim=41, hidden_dim=128, output_dim=1, num_layers=2, dropout=0.2, nhead=4)
-    adv_model = AdvancedLSTM(input_dim=26, hidden_dim=best_params['hidden_dim'], 
-                             output_dim=1, num_layers=best_params['num_layers'], 
-                             dropout=best_params['dropout'], num_fc_layers=best_params['num_fc_layers'])
-    
-
-    train_model(
-        adv_model,
-        X_train=X_train, y_train=y_train,
-        X_val=X_val, y_val=y_val, 
-        learning_rate=best_params['learning_rate'],
-        weight_decay=best_params['weight_decay'],
-        epochs=100  # Full training
-    )
