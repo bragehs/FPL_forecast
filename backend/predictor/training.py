@@ -47,10 +47,10 @@ def train_model(
         epochs=20,
         learning_rate=1e-4,
         weight_decay=1e-5,
+        batch_size=64,
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 64
 
     train_dataset = Seq2OutputDataset(X_train, y_train)
     val_dataset = Seq2OutputDataset(X_val, y_val)
@@ -109,7 +109,7 @@ def train_model(
             print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
-def hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=20):
+def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20):
     """Random search for hyperparameter tuning"""
     
     # Define hyperparameter ranges
@@ -119,7 +119,8 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=20):
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
         'num_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'num_fc_layers': [1, 2, 3, 4]
+        'num_fc_layers': [1, 2, 3, 4],
+        'batch_size': [32, 64, 128, 256],
     }
     
     best_rmse = float('inf')
@@ -136,7 +137,8 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=20):
             'weight_decay': random.choice(param_ranges['weight_decay']),
             'num_layers': random.choice(param_ranges['num_layers']),
             'dropout': random.choice(param_ranges['dropout']),
-            'num_fc_layers': random.choice(param_ranges['num_fc_layers'])
+            'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
+            'batch_size': random.choice(param_ranges['batch_size']),
         }
         
         print(f"\nTrial {trial+1}/{n_trials}")
@@ -162,7 +164,8 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, n_trials=20):
                 y_val=y_val, 
                 learning_rate=params['learning_rate'],
                 weight_decay=params['weight_decay'],
-                epochs=10  # Fewer epochs for tuning speed
+                batch_size=params['batch_size'],
+                epochs=epochs,
             )
             
             results.append({**params, 'rmse': val_rmse})
