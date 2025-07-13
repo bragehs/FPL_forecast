@@ -1,0 +1,184 @@
+{
+  "main": {
+    "id": "e8f267ea5d2a8b87",
+    "type": "split",
+    "children": [
+      {
+        "id": "2b4753fa4b007101",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "ea72f965b688c550",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "PLAN.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "PLAN"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "194981b5b9be8a6e",
+    "type": "split",
+    "children": [
+      {
+        "id": "762a943a60fb4406",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "557188ba4bc37ebe",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "0a76ab894f528946",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "bda2d5af8f81ae74",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "97c38919d5a5c42e",
+    "type": "split",
+    "children": [
+      {
+        "id": "535a0095a45e6f96",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "366ebdf7ed6b78f8",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "PLAN.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for PLAN"
+            }
+          },
+          {
+            "id": "03eba54f0360a6c1",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "PLAN.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from PLAN"
+            }
+          },
+          {
+            "id": "3cf1bfbbf55c2ede",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "dad19a5d85e04979",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "PLAN.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of PLAN"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false
+    }
+  },
+  "active": "ea72f965b688c550",
+  "lastOpenFiles": [
+    "backend/data/2024-25/fixtures-kopi.csv",
+    "backend/data/2024-25/gws/merged_gw.csv",
+    "backend/data/2024-25/gws/merged_gw copy.csv",
+    "backend/data/match_list.json.webloc",
+    "backend/predictor/__pycache__/scrape_fbref.cpython-311.pyc",
+    "backend/predictor/scrape_fbref.py",
+    "backend/util.py.webloc",
+    "backend/data/train_v8.csv",
+    "best_model.pth",
+    "PLAN.md"
+  ]
+}

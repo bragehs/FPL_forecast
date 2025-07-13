@@ -26,3 +26,4 @@ dist-ssr
 #data
 data/
 best_model.pth
+PLAN.md

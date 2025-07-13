@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_squared_error, root_mean_squared_error
 from sklearn.model_selection import train_test_split
 from training import create_loss_weights
 
@@ -18,25 +18,30 @@ def train_random_forest(X_train, y_train, n_estimators=100, random_state=42):
 
 def evaluate_model(model, X_val, y_val):
     predictions = model.predict(X_val)
-    mae = mean_absolute_error(y_val, predictions)
+    rmse = root_mean_squared_error(y_val, predictions)
     #rmse = mse ** 0.5
-    return mae
+    return rmse
 
 if __name__ == "__main__":
     # Load data
-    X, y = load_data("/Users/bragehs/Documents/FPL helper/Fantasy-Premier-League/data/predictor/data/train_sequences.pt")
-    if X.ndim == 3:
-        X = X.reshape(X.shape[0], -1)
-    # If y is 2D (samples, 1), flatten to (samples,)
-    if y.ndim > 1 and y.shape[1] == 1:
-        y = y.squeeze(1)
-    
-    # Split data into training and validation sets
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, y_train = load_data("/Users/bragehs/Documents/FPL_forecast/backend/predictor/data/train_sequences.pt")
+    X_val, y_val = load_data("/Users/bragehs/Documents/FPL_forecast/backend/predictor/data/val_sequences.pt")
+    def reshape_data(X, y):
+        if X.ndim == 3:
+            X = X.reshape(X.shape[0], -1)
+        # If y is 2D (samples, 1), flatten to (samples,)
+        if y.ndim > 1 and y.shape[1] == 1:
+            y = y.squeeze(1)
+        return X, y
+    X_train, y_train = reshape_data(X_train, y_train)
+    X_val, y_val = reshape_data(X_val, y_val)
+    print(f"Train sequences: {X_train.shape}, Targets: {y_train.shape}")
 
     # Train Random Forest model
     rf_model = train_random_forest(X_train, y_train)
 
     # Evaluate model
-    mae = evaluate_model(rf_model, X_val, y_val)
-    print(f"Random Forest MAE: {mae:.4f}")
+    rmse = evaluate_model(rf_model, X_val, y_val)
+    print(f"Random Forest RMSE: {rmse:.4f}")
+
+    #2.95 RMSE
