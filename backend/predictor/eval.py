@@ -5,7 +5,7 @@ from model import AdvancedLSTM
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-def load_model(model_path, input_dim=26, hidden_dim=128, num_layers=4, dropout=0.2, num_fc_layers=3):
+def load_model(model_path, input_dim=26, hidden_dim=256, num_layers=4, dropout=0.2, num_fc_layers=1):
     """Load the trained model"""
     model = AdvancedLSTM(
         input_dim=input_dim,
@@ -155,7 +155,7 @@ def analyze_prediction_distribution(y_pred, ranges=[(0, 2), (2, 4), (4, 6), (6, 
 def main():
     # Load test data
     print("Loading test data...")
-    X_test, y_test = torch.load("/Users/bragehs/Documents/FPL_forecast/backend/predictor/data/test_sequences.pt", weights_only=True)
+    X_test, y_test = torch.load("/Users/bragehs/Documents/FPL_forecast/backend/predictor/final_data/test_sequences.pt", weights_only=True)
     print(f"Test sequences: {X_test.shape}, Targets: {y_test.shape}")
     
     # Load best model (you may need to adjust these parameters based on your actual model)

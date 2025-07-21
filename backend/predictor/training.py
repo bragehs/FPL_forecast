@@ -75,7 +75,6 @@ def train_model(
         learning_rate=1e-4,
         weight_decay=1e-5,
         batch_size=64,
-        weight_ranges=[(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)]
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -89,7 +88,7 @@ def train_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rate,
                                                     steps_per_epoch=len(train_loader), epochs=epochs)
-    criterion = WeightedMSELoss(weight_ranges=weight_ranges)
+    criterion = torch.nn.MSELoss() 
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
     # --- Training loop ---
@@ -101,9 +100,7 @@ def train_model(
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
             output = model(X_batch)
-            #weights = create_loss_weights(y_batch)
             loss = criterion(output, y_batch)
-            #loss = (weights * loss).mean()
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -119,10 +116,10 @@ def train_model(
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
-                #weights = create_loss_weights(y_batch)
-                loss = criterion(output, y_batch)
-                _mae = mae(output, y_batch)
-                #loss = (weights * loss).mean()
+                transformed_output = torch.expm1(output)
+                transformed_y = torch.expm1(y_batch)
+                loss = criterion(transformed_output, transformed_y)
+                _mae = mae(transformed_output, transformed_y)
                 val_performance += np.sqrt(loss.item()) * X_batch.size(0)
                 mae_loss += _mae.item() * X_batch.size(0)
         avg_val_performance = val_performance / len(val_loader.dataset)
@@ -148,25 +145,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
         'num_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
         'num_fc_layers': [1, 2, 3, 4],
-        'batch_size': [32, 64, 128, 256],
-        'weight_ranges': [
-            # Standard weighting
-            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)],
-            # More aggressive high-value weighting
-            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 2.0), (6, 10, 4.0), (10, float('inf'), 7.0)],
-            # Conservative weighting
-            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.2), (6, 10, 2.0), (10, float('inf'), 3.0)],
-            # Moderate weighting
-            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.3), (6, 10, 2.5), (10, float('inf'), 4.0)],
-            # Very aggressive weighting
-            [(0, 2, 1.0), (2, 4, 1.0), (4, 6, 2.5), (6, 10, 5.0), (10, float('inf'), 10.0)],
-            # Balanced weighting
-            [(0, 2, 1.0), (2, 4, 1.1), (4, 6, 1.5), (6, 10, 2.5), (10, float('inf'), 4.5)],
-            # Different range splits
-            [(0, 3, 1.0), (3, 5, 1.3), (5, 8, 2.5), (8, 12, 4.0), (12, float('inf'), 6.0)],
-            # Focus on mid-range too
-            [(0, 2, 1.0), (2, 4, 1.4), (4, 6, 2.0), (6, 10, 3.5), (10, float('inf'), 5.5)]
-        ]
+        'batch_size': [32, 64, 128, 256]
     }
     
     best_rmse = float('inf')
@@ -185,7 +164,6 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
             'dropout': random.choice(param_ranges['dropout']),
             'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
             'batch_size': random.choice(param_ranges['batch_size']),
-            'weight_ranges': random.choice(param_ranges['weight_ranges'])
         }
         
         print(f"\nTrial {trial+1}/{n_trials}")
@@ -213,7 +191,6 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
                 weight_decay=params['weight_decay'],
                 batch_size=params['batch_size'],
                 epochs=epochs,
-                weight_ranges=params['weight_ranges']
             )
             
             results.append({**params, 'rmse': val_rmse})
