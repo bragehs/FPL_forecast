@@ -609,9 +609,9 @@ def main():
     # Oversample high-performing sequences
     X_train, y_train = oversample_sequences_adaptive(
         X_train, y_train, 
-        target_samples_per_bin=3000,  
-        n_bins=10,
-        min_original_samples=50  # Only create synthetic data if bin has at least 50 original samples
+        target_samples_per_bin=5000,  
+        n_bins=4,
+        min_original_samples=500
     )
 
     print(f"Train sequences: {X_train.shape}, Targets: {y_train.shape}")

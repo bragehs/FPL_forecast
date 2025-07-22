@@ -72,7 +72,10 @@ def train_model(
         avg_loss = epoch_loss / len(train_loader.dataset)
 
         if verbose >= 2:
-            print(f"Epoch {epoch+1} Training MSE: {avg_loss:.4f}")
+            if transform:
+                print(f"Epoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
+            else:
+                print(f"Epoch {epoch+1} Training MSE: {avg_loss:.4f}")
         # --- Validation loop ---
         model.eval()
         val_performance = 0
