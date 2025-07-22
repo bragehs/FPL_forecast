@@ -113,7 +113,7 @@ def train_model(
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
-def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20):
+def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epochs=10, n_trials=20):
     """Random search for hyperparameter tuning"""
     
     # Define hyperparameter ranges
@@ -171,6 +171,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
                 batch_size=params['batch_size'],
                 epochs=epochs,
                 verbose=1,
+                transform=transform
             )
             
             results.append({**params, 'rmse': val_rmse})
