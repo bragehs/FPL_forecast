@@ -33,11 +33,12 @@ def train_model(
         weight_decay=1e-5,
         batch_size=64,
         verbose=2,
+        transform=False,
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_dataset = Seq2OutputDataset(X_train, y_train, transform=False)
+    train_dataset = Seq2OutputDataset(X_train, y_train, transform=transform)
     val_dataset = Seq2OutputDataset(X_val, y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -80,9 +81,10 @@ def train_model(
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
-                transformed_output = torch.expm1(output)  # Inverse transform
-                loss = criterion(transformed_output, y_batch)
-                _mae = mae(transformed_output, y_batch)
+                if transform:
+                    output = torch.expm1(output)
+                loss = criterion(output, y_batch)
+                _mae = mae(output, y_batch)
                 val_performance += np.sqrt(loss.item()) * X_batch.size(0)
                 mae_loss += _mae.item() * X_batch.size(0)
         avg_val_performance = val_performance / len(val_loader.dataset)
