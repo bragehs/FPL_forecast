@@ -6,58 +6,15 @@ from model import AdvancedLSTM
 import os
 import numpy as np
 import random
-
-def create_loss_weights(data, alpha=4.0, percentile=0.95):
-    weight_cap = torch.quantile(data, percentile)
-    mean = data.mean()
-    dev = (data - mean).abs()
-    weights = 1 + alpha * dev / dev.max()
-    weights = torch.clamp(weights, max=weight_cap)
-    return weights
-
-class WeightedMSELoss(nn.Module):
-    def __init__(self, weight_ranges=[(0, 2, 1.0), (2, 4, 1.0), (4, 6, 1.5), (6, 10, 3.0), (10, float('inf'), 5.0)]):
-        super().__init__()
-        self.weight_ranges = weight_ranges
-    
-    def forward(self, y_pred, y_true):
-        # Flatten tensors
-        y_pred_flat = y_pred.view(-1)
-        y_true_flat = y_true.view(-1)
-        
-        # Create weights based on target values
-        weights = torch.ones_like(y_true_flat)
-        
-        for min_val, max_val, weight in self.weight_ranges:
-            if max_val == float('inf'):
-                mask = y_true_flat >= min_val
-            else:
-                mask = (y_true_flat >= min_val) & (y_true_flat < max_val)
-            weights[mask] = weight
-        
-        # Calculate weighted MSE
-        mse = (y_pred_flat - y_true_flat) ** 2
-        weighted_mse = mse * weights
-        
-        return weighted_mse.mean()
-
-class Seq2SeqDataset(Dataset):
-    def __init__(self, X, y, future_fd):
-        self.X = X
-        self.y = y
-        self.future_fd = future_fd
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx], self.future_fd[idx]
     
 
 class Seq2OutputDataset(Dataset):
-    def __init__(self, X, y):
+    def __init__(self, X, y, transform=False):
         self.X = X
-        self.y = y
+        if transform:
+            self.y = torch.log1p(y)
+        else:
+            self.y = y
 
     def __len__(self):
         return len(self.X)
@@ -79,7 +36,7 @@ def train_model(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_dataset = Seq2OutputDataset(X_train, y_train)
+    train_dataset = Seq2OutputDataset(X_train, y_train, transform=True)
     val_dataset = Seq2OutputDataset(X_val, y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -107,7 +64,7 @@ def train_model(
             epoch_loss += loss.item() * X_batch.size(0)
             progress.set_postfix(loss=f"{loss.item():.4f}", lr=optimizer.param_groups[0]['lr'])
         avg_loss = epoch_loss / len(train_loader.dataset)
-        print(f"Epoch {epoch+1} Training MSE: {avg_loss:.4f}")
+        print(f"Epoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
         # --- Validation loop ---
         model.eval()
         val_performance = 0
@@ -116,10 +73,9 @@ def train_model(
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
-                transformed_output = torch.expm1(output)
-                transformed_y = torch.expm1(y_batch)
-                loss = criterion(transformed_output, transformed_y)
-                _mae = mae(transformed_output, transformed_y)
+                transformed_output = torch.expm1(output)  # Inverse transform
+                loss = criterion(transformed_output, y_batch)
+                _mae = mae(transformed_output, y_batch)
                 val_performance += np.sqrt(loss.item()) * X_batch.size(0)
                 mae_loss += _mae.item() * X_batch.size(0)
         avg_val_performance = val_performance / len(val_loader.dataset)

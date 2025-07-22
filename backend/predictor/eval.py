@@ -1,19 +1,58 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from model import AdvancedLSTM
+from model import AdvancedLSTM, LSTMEncoderOnly
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-def load_model(model_path, input_dim=26, hidden_dim=256, num_layers=4, dropout=0.2, num_fc_layers=1):
+def create_inference_sequence(player_data, feature_cols, max_sequences=5):
+    """
+    Create a single padded sequence for inference when you have variable amounts of historical data.
+    
+    Args:
+        player_data: DataFrame with player's historical data (sorted by GW)
+        feature_cols: List of feature columns to include
+        max_sequences: Maximum sequence length (will pad to this length)
+    
+    Returns:
+        padded_sequence: numpy array with shape (max_sequences, num_features)
+    """
+    # Get the feature data
+    sequence_data = player_data[feature_cols].values
+    num_features = len(feature_cols)
+    
+    # Create padded sequence with zeros on the left
+    padded_sequence = np.zeros((max_sequences, num_features))
+    
+    # Determine how much padding is needed
+    actual_length = min(len(sequence_data), max_sequences)
+    padding_needed = max_sequences - actual_length
+    
+    if padding_needed > 0:
+        # Left-pad with zeros
+        padded_sequence[padding_needed:] = sequence_data[-actual_length:]
+    else:
+        # Take the last max_sequences if we have more data than needed
+        padded_sequence = sequence_data[-max_sequences:]
+    
+    return padded_sequence
+
+def load_model(model_path, input_dim=26, hidden_dim=96, num_layers=2, dropout=0.2, num_fc_layers=4):
     """Load the trained model"""
-    model = AdvancedLSTM(
+    """     model = AdvancedLSTM(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=1,
+            num_layers=num_layers,
+            dropout=dropout,
+            num_fc_layers=num_fc_layers
+        ) """
+    model = LSTMEncoderOnly(
         input_dim=input_dim,
-        hidden_dim=hidden_dim,
+        hidden_dim=128,
         output_dim=1,
-        num_layers=num_layers,
-        dropout=dropout,
-        num_fc_layers=num_fc_layers
+        num_layers=2,
+        dropout=dropout
     )
     model.load_state_dict(torch.load(model_path, map_location='cpu'))
     model.eval()
@@ -51,8 +90,9 @@ def get_predictions(model, X_tensor, batch_size=64):
         for i in range(0, len(X_tensor), batch_size):
             batch = X_tensor[i:i+batch_size].to(device)
             pred = model(batch)
-            predictions.append(pred.cpu())
-    
+            transformed_pred = torch.expm1(pred)
+            predictions.append(transformed_pred.cpu())
+
     return torch.cat(predictions, dim=0)
 
 def evaluate_by_padding_level(y_true, y_pred, padding_info):
@@ -68,8 +108,8 @@ def evaluate_by_padding_level(y_true, y_pred, padding_info):
                   if info['actual_data_rows'] == data_rows]
         
         if len(indices) > 0:
-            y_true_subset = y_true[indices]
-            y_pred_subset = y_pred[indices]
+            y_true_subset = (y_true[indices])
+            y_pred_subset = (y_pred[indices])
             
             mae = mae_fn(y_pred_subset, y_true_subset).item()
             rmse = torch.sqrt(mse_fn(y_pred_subset, y_true_subset)).item()
@@ -156,18 +196,19 @@ def main():
     # Load test data
     print("Loading test data...")
     X_test, y_test = torch.load("/Users/bragehs/Documents/FPL_forecast/backend/predictor/final_data/test_sequences.pt", weights_only=True)
+    y_test = torch.expm1(y_test)  # Reverse log transformation
     print(f"Test sequences: {X_test.shape}, Targets: {y_test.shape}")
     
     # Load best model (you may need to adjust these parameters based on your actual model)
     print("Loading best model...")
     try:
-        model = load_model("best_model.pth")
+        model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth")
         print("Model loaded successfully!")
     except Exception as e:
         print(f"Error loading model: {e}")
         # Try with different parameters if the default doesn't work
         print("Trying with different model parameters...")
-        model = load_model("best_model.pth", hidden_dim=96, num_layers=3, dropout=0.1, num_fc_layers=3)
+        model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth", hidden_dim=96, num_layers=3, dropout=0.1, num_fc_layers=3)
     
     # Get predictions
     print("Generating predictions...")
