@@ -85,7 +85,7 @@ def get_predictions(model, X_tensor, batch_size=64):
             batch = X_tensor[i:i+batch_size].to(device)
             pred = model(batch)
             transformed_pred = torch.expm1(pred)
-            predictions.append(transformed_pred.cpu())
+            predictions.append(pred.cpu())
 
     return torch.cat(predictions, dim=0)
 

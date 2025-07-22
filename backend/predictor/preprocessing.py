@@ -135,68 +135,289 @@ def filter_data(df):
 
     return df
 
-def oversample_sequences(X_tensor, y_tensor, target_percentile=0.8, n_synthetic=1000):
+def oversample_sequences_balanced(X_tensor, y_tensor, n_synthetic_per_percentile=200, n_percentiles=10):
     """
-    Oversample sequences directly after they've been created
-    Focus on high-performing sequences (rare cases)
+    Oversample sequences to create a balanced distribution across percentiles
+    
+    Args:
+        X_tensor: Input sequences
+        y_tensor: Target values
+        n_synthetic_per_percentile: Number of synthetic samples to generate per percentile
+        n_percentiles: Number of percentile bins to create (default: 10 for deciles)
+    
+    Returns:
+        X_combined: Original + synthetic sequences
+        y_combined: Original + synthetic targets
     """
     # Convert tensors to numpy for easier manipulation
     X_np = X_tensor.numpy()
-    y_np = y_tensor.numpy()
+    y_np = y_tensor.numpy().squeeze()
     
-    # Find high-performing sequences to oversample
-    target_threshold = np.percentile(y_np, target_percentile * 100)
-    high_performing_mask = y_np.squeeze() >= target_threshold
+    # Calculate percentile boundaries
+    percentiles = np.linspace(0, 100, n_percentiles + 1)
+    percentile_bounds = np.percentile(y_np, percentiles)
     
-    high_X = X_np[high_performing_mask]
-    high_y = y_np[high_performing_mask]
+    print(f"Creating balanced distribution across {n_percentiles} percentiles:")
+    for i in range(len(percentile_bounds) - 1):
+        print(f"  P{i*10}-{(i+1)*10}: {percentile_bounds[i]:.1f} - {percentile_bounds[i+1]:.1f}")
     
-    print(f"Found {len(high_X)} high-performing sequences (target >= {target_threshold:.1f})")
-    
-    if len(high_X) == 0:
-        return X_tensor, y_tensor
-    
-    # Generate synthetic sequences
     synthetic_X = []
     synthetic_y = []
     
-    for i in range(n_synthetic):
-        # Randomly select a high-performing sequence as base
-        idx = np.random.randint(0, len(high_X))
-        base_X = high_X[idx].copy()
-        base_y = high_y[idx].copy()
+    # Generate synthetic samples for each percentile bin
+    for i in range(len(percentile_bounds) - 1):
+        lower_bound = percentile_bounds[i]
+        upper_bound = percentile_bounds[i + 1]
         
-        # Add controlled noise to features
-        # Noise level: 2-5% of feature standard deviation
-        for seq_idx in range(base_X.shape[0]):  # For each timeframe in sequence
-            for feat_idx in range(base_X.shape[1]):  # For each feature
-                feature_values = X_np[:, seq_idx, feat_idx]  # All values for this feature
-                noise_std = np.std(feature_values) * np.random.uniform(0.02, 0.05)
-                noise = np.random.normal(0, noise_std)
-                base_X[seq_idx, feat_idx] += noise
+        # Find samples in this percentile range
+        if i == len(percentile_bounds) - 2:  # Last bin, include upper bound
+            mask = (y_np >= lower_bound) & (y_np <= upper_bound)
+        else:
+            mask = (y_np >= lower_bound) & (y_np < upper_bound)
         
-        # Add small noise to target
-        target_noise = np.random.normal(0, np.std(y_np) * 0.03)
-        base_y += target_noise
-        base_y = np.clip(base_y, 0, np.max(y_np))  # Keep in valid range
+        percentile_X = X_np[mask]
+        percentile_y = y_np[mask]
         
-        synthetic_X.append(base_X)
-        synthetic_y.append(base_y)
+        original_count = len(percentile_X)
+        print(f"  Percentile {i*10}-{(i+1)*10}: {original_count} original samples")
+        
+        if original_count == 0:
+            continue
+        
+        # Generate synthetic samples for this percentile
+        for j in range(n_synthetic_per_percentile):
+            # Randomly select a sample from this percentile as base
+            idx = np.random.randint(0, len(percentile_X))
+            base_X = percentile_X[idx].copy()
+            base_y = percentile_y[idx].copy()
+            
+            # Add controlled noise to features
+            for seq_idx in range(base_X.shape[0]):  # For each timeframe in sequence
+                for feat_idx in range(base_X.shape[1]):  # For each feature
+                    # Use feature values from the same percentile for noise calculation
+                    feature_values = percentile_X[:, seq_idx, feat_idx]
+                    if len(feature_values) > 1:
+                        noise_std = np.std(feature_values) * np.random.uniform(0.02, 0.08)
+                    else:
+                        # Fallback to global feature values if percentile has only 1 sample
+                        feature_values = X_np[:, seq_idx, feat_idx]
+                        noise_std = np.std(feature_values) * np.random.uniform(0.02, 0.08)
+                    
+                    noise = np.random.normal(0, noise_std)
+                    base_X[seq_idx, feat_idx] += noise
+            
+            # Add small noise to target while keeping it within percentile bounds
+            target_noise_std = (upper_bound - lower_bound) * 0.1  # 10% of percentile range
+            target_noise = np.random.normal(0, target_noise_std)
+            base_y += target_noise
+            
+            # Clip to stay within percentile bounds (with small tolerance)
+            tolerance = (upper_bound - lower_bound) * 0.05
+            base_y = np.clip(base_y, 
+                           max(0, lower_bound - tolerance), 
+                           min(np.max(y_np), upper_bound + tolerance))
+            
+            synthetic_X.append(base_X)
+            synthetic_y.append(base_y)
+    
+    if not synthetic_X:
+        print("No synthetic samples generated!")
+        return X_tensor, y_tensor
     
     # Convert back to tensors and combine
     synthetic_X_tensor = torch.tensor(np.array(synthetic_X), dtype=torch.float32)
-    synthetic_y_tensor = torch.tensor(np.array(synthetic_y), dtype=torch.float32)
+    synthetic_y_tensor = torch.tensor(np.array(synthetic_y), dtype=torch.float32).unsqueeze(-1)
     
     # Combine original and synthetic
     X_combined = torch.cat([X_tensor, synthetic_X_tensor], dim=0)
     y_combined = torch.cat([y_tensor, synthetic_y_tensor], dim=0)
     
+    print(f"\nBalanced oversampling results:")
     print(f"Original sequences: {len(X_tensor)}")
     print(f"Synthetic sequences: {len(synthetic_X_tensor)}")
     print(f"Total sequences: {len(X_combined)}")
     
+    # Analyze final distribution
+    analyze_distribution(y_combined.squeeze().numpy(), "Final Distribution")
+    
     return X_combined, y_combined
 
+def analyze_distribution(y_values, title="Distribution"):
+    """Analyze and print distribution statistics"""
+    percentiles = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+    percentile_values = np.percentile(y_values, percentiles)
+    
+    print(f"\n{title}:")
+    for i, (p, val) in enumerate(zip(percentiles, percentile_values)):
+        count = len(y_values[y_values <= val])
+        if i == 0:
+            prev_count = 0
+        else:
+            prev_count = len(y_values[y_values <= percentile_values[i-1]])
+        
+        bin_count = count - prev_count
+        print(f"  P{p:2d}: {val:5.1f} ({bin_count:4d} samples)")
+
+def oversample_sequences_adaptive(X_tensor, y_tensor, target_samples_per_bin=500, n_bins=10, min_original_samples=10):
+    """
+    Adaptive oversampling that brings all bins to the same sample count
+    
+    Args:
+        X_tensor: Input sequences
+        y_tensor: Target values
+        target_samples_per_bin: Target number of samples per bin
+        n_bins: Number of bins to create
+        min_original_samples: Minimum original samples required in bin to generate synthetic ones
+    """
+    X_np = X_tensor.numpy()
+    y_np = y_tensor.numpy().squeeze()
+    
+    # Create equal-width bins
+    y_min, y_max = y_np.min(), y_np.max()
+    bin_edges = np.linspace(y_min, y_max, n_bins + 1)
+    
+    print(f"Adaptive oversampling with {n_bins} bins, target: {target_samples_per_bin} samples per bin")
+    
+    synthetic_X = []
+    synthetic_y = []
+    
+    for i in range(len(bin_edges) - 1):
+        lower_bound = bin_edges[i]
+        upper_bound = bin_edges[i + 1]
+        
+        # Find samples in this bin
+        if i == len(bin_edges) - 2:  # Last bin
+            mask = (y_np >= lower_bound) & (y_np <= upper_bound)
+        else:
+            mask = (y_np >= lower_bound) & (y_np < upper_bound)
+        
+        bin_X = X_np[mask]
+        bin_y = y_np[mask]
+        original_count = len(bin_X)
+        
+        # Calculate how many synthetic samples needed
+        samples_needed = max(0, target_samples_per_bin - original_count)
+        
+        print(f"  Bin {i+1} [{lower_bound:.1f}-{upper_bound:.1f}]: {original_count} original, generating {samples_needed}")
+        
+        if samples_needed == 0 or original_count == 0:
+            continue
+        
+        # Skip bins with too few original samples
+        if original_count < min_original_samples:
+            print(f"    Skipping bin {i+1}: only {original_count} original samples (< {min_original_samples} minimum)")
+            continue
+        
+        # Generate synthetic samples for this bin
+        for j in range(samples_needed):
+            # Randomly select a sample from this bin as base
+            idx = np.random.randint(0, len(bin_X))
+            base_X = bin_X[idx].copy()
+            base_y = bin_y[idx].copy()
+            
+            # Add noise (similar to previous function)
+            for seq_idx in range(base_X.shape[0]):
+                for feat_idx in range(base_X.shape[1]):
+                    if len(bin_X) > 1:
+                        feature_values = bin_X[:, seq_idx, feat_idx]
+                        noise_std = np.std(feature_values) * np.random.uniform(0.03, 0.1)
+                    else:
+                        feature_values = X_np[:, seq_idx, feat_idx]
+                        noise_std = np.std(feature_values) * np.random.uniform(0.03, 0.1)
+                    
+                    noise = np.random.normal(0, noise_std)
+                    base_X[seq_idx, feat_idx] += noise
+            
+            # Add noise to target within bin bounds
+            bin_range = upper_bound - lower_bound
+            target_noise = np.random.normal(0, bin_range * 0.1)
+            base_y += target_noise
+            base_y = np.clip(base_y, lower_bound, upper_bound)
+            
+            synthetic_X.append(base_X)
+            synthetic_y.append(base_y)
+    
+    if not synthetic_X:
+        return X_tensor, y_tensor
+    
+    # Combine results
+    synthetic_X_tensor = torch.tensor(np.array(synthetic_X), dtype=torch.float32)
+    synthetic_y_tensor = torch.tensor(np.array(synthetic_y), dtype=torch.float32).unsqueeze(-1)
+    
+    X_combined = torch.cat([X_tensor, synthetic_X_tensor], dim=0)
+    y_combined = torch.cat([y_tensor, synthetic_y_tensor], dim=0)
+    
+    print(f"\nAdaptive oversampling results:")
+    print(f"Original: {len(X_tensor)}, Synthetic: {len(synthetic_X_tensor)}, Total: {len(X_combined)}")
+    
+    analyze_distribution(y_combined.squeeze().numpy(), "Final Balanced Distribution")
+    
+    return X_combined, y_combined
+
+def undersample_sequences_percentile(X_tensor, y_tensor, target_percentile=20, target_samples=1000):
+    """
+    Undersample sequences in a specific percentile range
+    
+    Args:
+        X_tensor: Input sequences
+        y_tensor: Target values
+        target_percentile: Percentile threshold below which to undersample (default: 20 = bottom 20%)
+        target_samples: Target number of samples to keep in the undersampled percentile
+    
+    Returns:
+        X_combined: Undersampled sequences
+        y_combined: Undersampled targets
+    """
+    X_np = X_tensor.numpy()
+    y_np = y_tensor.numpy().squeeze()
+    
+    # Calculate percentile threshold
+    percentile_threshold = np.percentile(y_np, target_percentile)
+    
+    # Split data into percentile groups
+    low_percentile_mask = y_np <= percentile_threshold
+    high_percentile_mask = y_np > percentile_threshold
+    
+    low_X = X_np[low_percentile_mask]
+    low_y = y_np[low_percentile_mask]
+    high_X = X_np[high_percentile_mask]
+    high_y = y_np[high_percentile_mask]
+    
+    original_low_count = len(low_X)
+    original_high_count = len(high_X)
+    
+    print(f"Undersampling bottom {target_percentile}% (scores ≤ {percentile_threshold:.1f}):")
+    print(f"  Original low percentile samples: {original_low_count}")
+    print(f"  Original high percentile samples: {original_high_count}")
+    
+    # Undersample the low percentile if it has more samples than target
+    if original_low_count > target_samples:
+        # Randomly select target_samples from low percentile
+        indices = np.random.choice(original_low_count, target_samples, replace=False)
+        undersampled_low_X = low_X[indices]
+        undersampled_low_y = low_y[indices]
+        print(f"  Undersampled to: {len(undersampled_low_X)} samples")
+    else:
+        undersampled_low_X = low_X
+        undersampled_low_y = low_y
+        print(f"  No undersampling needed (already ≤ {target_samples} samples)")
+    
+    # Combine undersampled low percentile with all high percentile samples
+    X_combined_np = np.concatenate([undersampled_low_X, high_X], axis=0)
+    y_combined_np = np.concatenate([undersampled_low_y, high_y], axis=0)
+    
+    # Convert back to tensors
+    X_combined = torch.tensor(X_combined_np, dtype=torch.float32)
+    y_combined = torch.tensor(y_combined_np, dtype=torch.float32).unsqueeze(-1)
+    
+    print(f"\nUndersampling results:")
+    print(f"Original total: {len(X_tensor)}")
+    print(f"Final total: {len(X_combined)}")
+    print(f"Removed: {len(X_tensor) - len(X_combined)} samples")
+    
+    analyze_distribution(y_combined.squeeze().numpy(), "Distribution After Undersampling")
+    
+    return X_combined, y_combined
 
 def split_data(df, train_ratio=0.7, val_ratio=0.15):
     n = len(df)
@@ -378,10 +599,20 @@ def main():
     future_sequences=1, 
     min_sequences=1
 )
+    
+    X_train, y_train = undersample_sequences_percentile(
+        X_train, y_train, 
+        target_percentile=60, 
+        target_samples=4000
+    )
+
     # Oversample high-performing sequences
-    X_train, y_train = oversample_sequences(X_train, y_train, 
-                                            target_percentile=0.85,
-                                            n_synthetic=10000)
+    X_train, y_train = oversample_sequences_adaptive(
+        X_train, y_train, 
+        target_samples_per_bin=3000,  
+        n_bins=10,
+        min_original_samples=50  # Only create synthetic data if bin has at least 50 original samples
+    )
 
     print(f"Train sequences: {X_train.shape}, Targets: {y_train.shape}")
     print(f"Val sequences: {X_val.shape}, Targets: {y_val.shape}")
