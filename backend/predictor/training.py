@@ -32,6 +32,7 @@ def train_model(
         learning_rate=1e-4,
         weight_decay=1e-5,
         batch_size=64,
+        verbose=2,
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -52,7 +53,10 @@ def train_model(
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0
-        progress = tqdm(train_loader, desc=f"Epoch {epoch+1:2d}/{epochs}")
+        if verbose >= 2:
+            progress = tqdm(train_loader, desc=f"Epoch {epoch+1:2d}/{epochs}")
+        else:
+            progress = train_loader
         for X_batch, y_batch in progress:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
@@ -62,9 +66,12 @@ def train_model(
             optimizer.step()
             scheduler.step()
             epoch_loss += loss.item() * X_batch.size(0)
-            progress.set_postfix(loss=f"{loss.item():.4f}", lr=optimizer.param_groups[0]['lr'])
+            if verbose >= 2 and hasattr(progress, 'set_postfix'):
+                progress.set_postfix(loss=f"{loss.item():.4f}", lr=optimizer.param_groups[0]['lr'])
         avg_loss = epoch_loss / len(train_loader.dataset)
-        print(f"Epoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
+
+        if verbose >= 2:
+            print(f"Epoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
         # --- Validation loop ---
         model.eval()
         val_performance = 0
@@ -80,14 +87,16 @@ def train_model(
                 mae_loss += _mae.item() * X_batch.size(0)
         avg_val_performance = val_performance / len(val_loader.dataset)
         avg_mae_loss = mae_loss / len(val_loader.dataset)
-        print(f"Epoch {epoch+1} validation RMSE: {avg_val_performance:.4f}")
-        print(f"Epoch {epoch+1} validation MAE: {avg_mae_loss:.4f}")
+        if verbose >= 2:
+            print(f"Epoch {epoch+1} validation RMSE: {avg_val_performance:.4f}")
+            print(f"Epoch {epoch+1} validation MAE: {avg_mae_loss:.4f}")
 
 
         if avg_val_performance < best_performance:
             best_performance = avg_val_performance
-            torch.save(model.state_dict(), f"best_model.pth")
-            print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
+            if verbose >= 2:
+                torch.save(model.state_dict(), f"best_model.pth")
+                print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
 def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20):
@@ -147,6 +156,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, epochs=10, n_trials=20
                 weight_decay=params['weight_decay'],
                 batch_size=params['batch_size'],
                 epochs=epochs,
+                verbose=1,
             )
             
             results.append({**params, 'rmse': val_rmse})
