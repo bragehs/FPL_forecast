@@ -5,6 +5,7 @@ from model import AdvancedLSTM, LSTMEncoderOnly
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+
 def create_inference_sequence(player_data, feature_cols, max_sequences=5):
     """
     Create a single padded sequence for inference when you have variable amounts of historical data.
@@ -37,24 +38,17 @@ def create_inference_sequence(player_data, feature_cols, max_sequences=5):
     
     return padded_sequence
 
-def load_model(model_path, input_dim=26, hidden_dim=96, num_layers=2, dropout=0.2, num_fc_layers=4):
+def load_model(model_path):
     """Load the trained model"""
-    """     model = AdvancedLSTM(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
+    model_data = torch.load(model_path, map_location='cpu')
+    model = AdvancedLSTM(
+            input_dim=26,
+            hidden_dim=model_data['hidden_dim'],
             output_dim=1,
-            num_layers=num_layers,
-            dropout=dropout,
-            num_fc_layers=num_fc_layers
-        ) """
-    model = LSTMEncoderOnly(
-        input_dim=input_dim,
-        hidden_dim=128,
-        output_dim=1,
-        num_layers=2,
-        dropout=dropout
-    )
-    model.load_state_dict(torch.load(model_path, map_location='cpu'))
+            num_layers=model_data['num_layers'],
+            num_fc_layers=model_data['num_fc_layers']
+        ) 
+    model.load_state_dict(model_data['model_state_dict'])
     model.eval()
     return model
 
@@ -196,19 +190,12 @@ def main():
     # Load test data
     print("Loading test data...")
     X_test, y_test = torch.load("/Users/bragehs/Documents/FPL_forecast/backend/predictor/final_data/test_sequences.pt", weights_only=True)
-    y_test = torch.expm1(y_test)  # Reverse log transformation
     print(f"Test sequences: {X_test.shape}, Targets: {y_test.shape}")
     
     # Load best model (you may need to adjust these parameters based on your actual model)
     print("Loading best model...")
-    try:
-        model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth")
-        print("Model loaded successfully!")
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        # Try with different parameters if the default doesn't work
-        print("Trying with different model parameters...")
-        model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth", hidden_dim=96, num_layers=3, dropout=0.1, num_fc_layers=3)
+    model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth")
+    print("Model loaded successfully!")
     
     # Get predictions
     print("Generating predictions...")

@@ -37,7 +37,7 @@ def train_model(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_dataset = Seq2OutputDataset(X_train, y_train, transform=True)
+    train_dataset = Seq2OutputDataset(X_train, y_train, transform=False)
     val_dataset = Seq2OutputDataset(X_val, y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -95,7 +95,16 @@ def train_model(
         if avg_val_performance < best_performance:
             best_performance = avg_val_performance
             if verbose >= 2:
-                torch.save(model.state_dict(), f"best_model.pth")
+                model_data = {
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'epoch': epoch,
+                    'best_performance': best_performance,
+                    'hidden_dim': model.hidden_dim,
+                    'num_layers': model.num_layers,
+                    'num_fc_layers': model.num_fc_layers}
+                torch.save(model_data, f"best_model.pth")
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 

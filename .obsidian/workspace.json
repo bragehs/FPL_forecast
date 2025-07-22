@@ -170,6 +170,7 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "best_model.pth",
     "backend/predictor/final_data/val_sequences.pt",
     "backend/predictor/final_data/train_sequences.pt",
     "backend/predictor/final_data/test_sequences.pt",
@@ -180,7 +181,6 @@
     "backend/data/2024-25/fixtures-kopi.csv",
     "backend/data/2024-25/gws/merged_gw.csv",
     "backend/data/2024-25/gws/merged_gw copy.csv",
-    "backend/data/match_list.json.webloc",
     "PLAN.md"
   ]
 }

@@ -20,6 +20,8 @@ class AdvancedLSTM(nn.Module):
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
         self.num_fc_layers = num_fc_layers
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
         
         # Build dynamic FC layers
         self.fc_layers = nn.ModuleList()
