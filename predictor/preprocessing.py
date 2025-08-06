@@ -433,7 +433,7 @@ def remove_correlated_features_advanced(df, threshold=0.95, method='pearson',
     return df_cleaned, result_info
 
 
-def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, padding_strategy='aggressive'):
+def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, padding_strategy='aggressive', meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
     
@@ -453,7 +453,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
         y_tensor: Target sequences  
         mapping_df: DataFrame with player/GW info for each sequence
     """
-    feature_cols = sorted([col for col in df.columns if col not in ['total_points', 'GW', 'element', 'name', 'season_x', 'team_x', 'minutes']])
+    feature_cols = sorted([col for col in df.columns if col not in meta_data])
     X_seq, y_seq = [], []
     mapping_info = []
     
@@ -464,7 +464,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
     
         # Standard sequences (same as before)
         for i in range(len(group) - future_sequences + 1):
-            target_start_idx = i + 1
+            target_start_idx = i
             
             # Skip if we don't have enough future data
             if target_start_idx + future_sequences - 1 >= len(group):
@@ -518,7 +518,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
             # This simulates situations where we have limited historical data due to transfers, injuries, etc.
             
             for i in range(past_sequences, min(len(group) - future_sequences + 1, 20)):  # Limit to first 20 GWs
-                target_start_idx = i + 1
+                target_start_idx = i
                 
                 if target_start_idx + future_sequences - 1 >= len(group):
                     continue
@@ -567,7 +567,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
                 if i >= len(group) - future_sequences + 1:
                     continue
                 
-                target_start_idx = i + 1
+                target_start_idx = i
                 if target_start_idx + future_sequences - 1 >= len(group):
                     continue
                 
@@ -610,7 +610,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
 
 
 #should really have train and test sequences in the same function
-def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequences=1):
+def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequences=1, meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
     For early gameweeks, pad with zeros:
@@ -625,7 +625,7 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequence
         y_tensor: Target sequences  
         mapping_df: DataFrame with player/GW info for each sequence
     """
-    feature_cols = sorted([col for col in df.columns if col not in ['total_points', 'GW', 'element', 'name', 'season_x', 'team_x', 'minutes']])
+    feature_cols = sorted([col for col in df.columns if col not in meta_data])
     X_seq, y_seq = [], []
     mapping_info = []
     
@@ -637,7 +637,7 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequence
         # Start from the first gameweek (index 0) and create sequences
         for i in range(len(group) - future_sequences + 1):
             # For predictions, we need the next gameweek(s) after position i
-            target_start_idx = i + 1
+            target_start_idx = i
             
             # Skip if we don't have enough future data
             if target_start_idx + future_sequences - 1 >= len(group):
@@ -762,7 +762,8 @@ def main():
     remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
     pickle.dump(remaining_lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
     
-    needed_features = ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes'] + remaining_lagged_features
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes']
+    needed_features = extra_needed + remaining_lagged_features
 
     for col in [col for col in needed_features if col not in ['season_x', 'name']]:
         train[col] = train[col].astype(float)
@@ -780,6 +781,7 @@ def main():
         past_sequences=5, 
         future_sequences=1, 
         min_sequences=1,
+        meta_data= extra_needed,
     )
 
     X_val, y_val, val_mapping = create_sequences_test(
@@ -787,6 +789,7 @@ def main():
         past_sequences=5, 
         future_sequences=1, 
         min_sequences=1,
+        meta_data= extra_needed,
     )
 
     X_test, y_test, test_mapping = create_sequences_test(
@@ -794,6 +797,7 @@ def main():
         past_sequences=5, 
         future_sequences=1, 
         min_sequences=1,
+        meta_data= extra_needed,
     )
 
     # Save processed sequence data
