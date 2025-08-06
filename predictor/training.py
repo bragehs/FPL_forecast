@@ -34,14 +34,15 @@ def train_model(
         batch_size=64,
         verbose=2,
         transform=False,
+        num_workers=0
     ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_dataset = Seq2OutputDataset(X_train, y_train, transform=transform)
     val_dataset = Seq2OutputDataset(X_val, y_val)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
