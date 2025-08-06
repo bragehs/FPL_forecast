@@ -1,30 +1,12 @@
-# hobby_prosjekt
-hobby prosjekt (?)
-# React med TypeScript
-fksal
-Dette er et ganske simpelt prosjekt med ordinær React med TypeScript som bygges med [Vite](https://vitejs.dev/)
 
-Vi har mer eller mindre kjørt kommandoen for å opprette et nytt React-prosjekt med TypeScript og Vite, og så har vi fjernet [`eslint`](https://www.npmjs.com/package/eslint), lagt til [`prettier`](https://www.npmjs.com/package/prettier), og gjort noen endringer i selve koden.
+## DONE
 
-Om du ønsker å bruke dette utgangspunktet kan du kjøre følgende kommando
+predictor folder contains scripts which, from a csv file fetched from https://github.com/vaastav/Fantasy-Premier-League, produces an LSTM model that simulates a score of 2371 in FPL in 24/25. the notebook run_simulation showcases this. NB! this is with unlimited transfers as finding optimal transfer strategies is a lot of work. So the score is probably better than reality. The score was without triple captain and bench boost though. 
 
-```bash
-# react
-npx degit github:bekk/prosjektutgangspunkt/react react-prosjekt
-```
 
-Om du ønsker å ta utgangspunkt i den offisielle malen for React-prosjekter bygget med Vite, kan du kjøre følgende kommando
+## TODO
 
-```bash
-npm create vite@latest react -- --template react
-```
+use the FPL public API to fetch data for the 25/26 season and use the model to get predictions for next gameweek for all players. Also show the dream team for the next gameweek (within the squad constraints). 
 
-## Oppsett og utvikling på lokal maskin
-
-```bash
-# Installer avhengigheter - dette trenger du bare å gjøre første gangen
-npm install
-
-# Kjør appen lokalt for utvikling
-npm run dev
-```
+how should the model´s output get to the web?
+	- current thinking: deploy the model on the web and then call it on load or interaction. this way i do not have to implement my own backend properly. 
