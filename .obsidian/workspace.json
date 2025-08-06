@@ -170,17 +170,17 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "backend/predictor/best_model.pth",
+    "backend/predictor/training.py",
+    "backend/training.py",
+    "training.py",
+    "backend/predictor/model.py",
+    "backend/model.py",
+    "model.py",
+    "backend/predictor/summed_df_debug.csv",
+    "backend/best_model.pth",
     "best_model.pth",
     "backend/predictor/final_data/val_sequences.pt",
-    "backend/predictor/final_data/train_sequences.pt",
-    "backend/predictor/final_data/test_sequences.pt",
-    "backend/predictor/final_data",
-    "backend/predictor/eval.py",
-    "backend/predictor/data/test_sequences.pt",
-    "backend/predictor/run_training.ipynb",
-    "backend/data/2024-25/fixtures-kopi.csv",
-    "backend/data/2024-25/gws/merged_gw.csv",
-    "backend/data/2024-25/gws/merged_gw copy.csv",
     "PLAN.md"
   ]
 }
