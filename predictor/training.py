@@ -151,40 +151,34 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
         
         # Create model with sampled parameters
         model = AdvancedLSTM(
-            input_dim=26, 
+            input_dim=X_train.shape[-1], 
             hidden_dim=params['hidden_dim'], 
             output_dim=1,
             num_layers=params['num_layers'],
             dropout=params['dropout'],
             num_fc_layers=params['num_fc_layers']
+        )     
+        # Train model
+        val_rmse = train_model(
+            model,
+            X_train=X_train, 
+            y_train=y_train,
+            X_val=X_val, 
+            y_val=y_val, 
+            learning_rate=params['learning_rate'],
+            weight_decay=params['weight_decay'],
+            batch_size=params['batch_size'],
+            epochs=epochs,
+            verbose=1,
+            transform=transform
         )
         
-        # Train model
-        try:
-            val_rmse = train_model(
-                model,
-                X_train=X_train, 
-                y_train=y_train,
-                X_val=X_val, 
-                y_val=y_val, 
-                learning_rate=params['learning_rate'],
-                weight_decay=params['weight_decay'],
-                batch_size=params['batch_size'],
-                epochs=epochs,
-                verbose=1,
-                transform=transform
-            )
-            
-            results.append({**params, 'rmse': val_rmse})
-            
-            if val_rmse < best_rmse:
-                best_rmse = val_rmse
-                best_params = params
-                print(f"New best RMSE: {best_rmse:.4f}")
-                
-        except Exception as e:
-            print(f"Trial {trial+1} failed: {e}")
-            continue
+        results.append({**params, 'rmse': val_rmse})
+        
+        if val_rmse < best_rmse:
+            best_rmse = val_rmse
+            best_params = params
+            print(f"New best RMSE: {best_rmse:.4f}")
     
     # Print top 5 results
     print(f"\nTop 5 hyperparameter combinations:")
@@ -196,36 +190,3 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
     print(f"Best RMSE: {best_rmse:.4f}")
     
     return best_params
-
-
-if __name__ == "__main__":
-    base_path = os.getcwd() + '/backend/predictor'
-    data_path = os.path.join(base_path, 'processed_data')
-    X_train = torch.load(data_path + '/X_train.pt', weights_only=True)
-    y_train = torch.load(data_path + '/y_train.pt', weights_only=True)
-    X_val = torch.load(data_path + '/X_val.pt', weights_only=True)
-    y_val = torch.load(data_path + '/y_val.pt', weights_only=True)
-
-    input_dim = X_train.shape[-1]
-    print(f"Input dimension: {input_dim}")
-
-    model = AdvancedLSTM(
-        input_dim=input_dim, 
-        hidden_dim=64, 
-        output_dim=1,
-        num_layers=1,
-        dropout=0.2,
-        num_fc_layers=1
-    )
-    train_model(
-        model,
-        X_train=X_train, 
-        y_train=y_train,
-        X_val=X_val, 
-        y_val=y_val,
-        epochs=20,
-        learning_rate=1e-3,
-        weight_decay=1e-4,
-        batch_size=64,
-        verbose=2,
-    )
