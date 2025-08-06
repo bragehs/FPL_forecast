@@ -432,7 +432,7 @@ def remove_correlated_features_advanced(df, threshold=0.95, method='pearson',
     return df_cleaned, result_info
 
 
-def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, meta_data=[]):
+def create_sequences_train(df, past_sequences=5, future_sequences=3, meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
     aggressive padding strategy:
@@ -549,7 +549,7 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
 
 
 #should really have train and test sequences in the same function
-def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequences=1, meta_data=[]):
+def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
     For early gameweeks, pad with zeros:
