@@ -145,13 +145,12 @@ def fix_gameweek_labels(df):
 
 def filter_data(df): 
     df.loc[df['position_encoded'].isna(), 'position_encoded'] = -1
-    #df.loc[df['total_points'] < 0, 'total_points'] = 0
     df.loc[df['fixture_difficulty'] == 1, 'fixture_difficulty'] = 2
     df.loc[df['fixture_difficulty'].isna(), 'fixture_difficulty'] = 0
     df = df[df['position'] != 'AM']  # Exclude managers
     df['season_progress'] = df['GW'] / df['GW'].max()
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
-    #df =df.dropna(subset=['fixture_difficulty'])
+    df = df[df['minutes'] > 0]  # Exclude players with 0 minutes
     return df
 
 def add_fixture_difficulty_to_dataframe(df, backend_root):
@@ -691,7 +690,7 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequence
 
 
 def main():
-    base_path = os.getcwd() + '/backend/predictor/'
+    base_path = os.getcwd() + '/predictor/'
     file_path = os.path.join(base_path, "data/cleaned_merged_seasons.csv")
     data = pd.read_csv(file_path)
 
@@ -732,7 +731,6 @@ def main():
     continuous_features = [col for col in lagged_features if col not in categorical_features + target]
     meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
     
-    #should normalize based on the training data only, but this is not done here
     seasons = np.unique(data["season_x"])
     number_of_training_seasons = len(seasons) - 2
     train_seasons = seasons[:number_of_training_seasons]
