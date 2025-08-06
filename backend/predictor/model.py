@@ -19,6 +19,7 @@ class AdvancedLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim=1, num_layers=3, dropout=0.3, num_fc_layers=2):
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
+        self.input_dim = input_dim
         self.num_fc_layers = num_fc_layers
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers

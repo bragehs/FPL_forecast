@@ -1,52 +1,158 @@
 import pandas as pd
-import os
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, MinMaxScaler
-import torch
 import numpy as np
-import torch.nn.functional as F
-import torch.nn as nn
-import smogn
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, OneHotEncoder
+import os
+import unidecode
+import torch
+import pickle
 
-categorical_features = [
-    'position',           # Player position (GK, DEF, MID, FWD)
-]
+position_mapping = {
+    'GK': 0,
+    'GKP': 0,
+    'DEF': 1,
+    'MID': 2,
+    'FWD': 3
+}
 
-binary_features = [
-    'was_home',          # Home/Away (boolean)
-]
+player_features_to_lag = [
+    'assists',
+     'bonus',
+     'bps',
+     'creativity',
+     'clean_sheets',
+     'goals_conceded',
+     'goals_scored',
+     'ict_index',
+     'influence',
+     'minutes',
+     'threat',
+     'red_cards',
+     'yellow_cards',
+     'result_encoded',
+     'total_points',
+    ]
 
-min_max_features = [
-    'bonus', 'minutes','fixture_difficulty', 'yellow_cards', 'red_cards', 
-    'own_goals', 'saves', 'goals_conceded','clean_sheets', 'penalties_missed',
-    'penalties_saved', 'assists', 'goals_scored', 'season_progress', 'expected_goals',
-    'expected_assists', 'expected_goals_conceded','creativity', 'influence',
-     'threat', 'ict_index', 'bps',
-    # Rolling features
-   # 'total_points_rolling_3', 'total_points_rolling_5',
-    #'goals_rolling_3', 'goals_rolling_5',
-   # 'assists_rolling_3', 'assists_rolling_5',
-   # 'minutes_rolling_3', 'minutes_rolling_5',
-   # 'points_std_3', 'points_std_5',
-   # 'clean_sheets_rolling_3', 'clean_sheets_rolling_5',
 
-    # Streak features
-   # 'points_streak', 'games_without_return', 'starts_streak',
+
+def create_result_column(df):
+    home_result = df['team_h_score']
+    away_result = df['team_a_score']
+    player_team = df['was_home']
+    if player_team:
+        if home_result > away_result:
+            return 2
+        elif home_result == away_result:
+            return 1
+        else:
+            return 0
+    else:
+        if away_result > home_result:
+            return 2
+        elif away_result == home_result:
+            return 1
+        else:
+            return 0
+        
+
+def fix_gameweek_labels(df):
+    """
+    Fix gameweek labels by sorting players by fixture within each season
+    and reassigning GW numbers sequentially, but only when necessary.
     
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with columns: element, season_x, fixture, GW
+    
+    Returns:
+    --------
+    pandas.DataFrame : DataFrame with corrected GW labels
+    """
+    df_fixed = df.copy()
+    
+    print("Analyzing GW data before fixing:")
+    
+    # Check each player's GW situation
+    players_to_fix = []
+    
+    for (element, season), player_data in df_fixed.groupby(['element', 'season_x']):
+        gw_count = len(player_data)
+        unique_gws = player_data['GW'].nunique()
+        
+        # Check if player has more than 38 GWs or has duplicate GWs
+        if gw_count > 38 or unique_gws < gw_count:
+            players_to_fix.append((element, season))
+            
+            if gw_count > 38:
+                print(f"Player {element} in {season}: has {gw_count} games (>38)")
+            if unique_gws < gw_count:
+                print(f"Player {element} in {season}: has duplicate GWs ({unique_gws} unique out of {gw_count})")
+    
+    print(f"Found {len(players_to_fix)} players that need GW fixing")
+    
+    # Only fix players that actually need fixing
+    for element, season in players_to_fix:
+        mask = (df_fixed['element'] == element) & (df_fixed['season_x'] == season)
+        player_data = df_fixed[mask].copy()
+        
+        # Sort by fixture and reassign GW numbers
+        player_data = player_data.sort_values('fixture').reset_index()
+        
+        # If player has more than 38 games, only keep first 38. This may be faulty but it only seems to happen in the training data.
+        if len(player_data) > 38:
+            print(f"Truncating player {element} in {season} from {len(player_data)} to 38 games")
+            player_data = player_data.head(38)
+            # Remove the extra rows from the main dataframe
+            df_fixed = df_fixed[~((df_fixed['element'] == element) & 
+                                 (df_fixed['season_x'] == season) & 
+                                 (df_fixed.index.isin(player_data.iloc[38:]['index'].values)))]
+        
+        # Reassign GW numbers sequentially
+        new_gws = list(range(1, len(player_data) + 1))
+        
+        # Update the main dataframe
+        for i, (_, row) in enumerate(player_data.iterrows()):
+            if i < len(new_gws):
+                df_fixed.loc[row['index'], 'GW'] = new_gws[i]
+    
+    # Verify the fix worked
+    print("\nChecking GW assignment after fix:")
+    for season in df_fixed['season_x'].unique():
+        season_data = df_fixed[df_fixed['season_x'] == season]
+        gw_counts = season_data.groupby('element')['GW'].count()
+        players_with_38_gws = (gw_counts == 38).sum()
+        players_with_less_than_38 = (gw_counts < 38).sum()
+        players_with_more_than_38 = (gw_counts > 38).sum()
+        total_players = len(gw_counts)
+        
+        print(f"Season {season}: {players_with_38_gws}/{total_players} players have exactly 38 GWs")
+        if players_with_less_than_38 > 0:
+            print(f"  - {players_with_less_than_38} players have <38 GWs")
+        if players_with_more_than_38 > 0:
+            print(f"  - {players_with_more_than_38} players have >38 GWs")
+        
+        # Check GW range
+        min_gw = season_data['GW'].min()
+        max_gw = season_data['GW'].max()
+        print(f"Season {season}: GW range is {min_gw}-{max_gw}")
+        
+        # Check for duplicates
+        duplicate_count = season_data.groupby(['element', 'GW']).size().gt(1).sum()
+        if duplicate_count > 0:
+            print(f"  - Found {duplicate_count} duplicate GW entries")
+    
+    return df_fixed
 
-]
-
-
-metadata_features = [
-    'name',                    # Player name (use for grouping/analysis)
-    'element',                 # Player ID (use for grouping sequences)
-    'team_x',                 
-    'season_x', 
-]
-
-time_feature = 'round'
-target = 'total_points'  # Target variable for prediction
-
+def filter_data(df): 
+    df.loc[df['position_encoded'].isna(), 'position_encoded'] = -1
+    #df.loc[df['total_points'] < 0, 'total_points'] = 0
+    df.loc[df['fixture_difficulty'] == 1, 'fixture_difficulty'] = 2
+    df.loc[df['fixture_difficulty'].isna(), 'fixture_difficulty'] = 0
+    df = df[df['position'] != 'AM']  # Exclude managers
+    df['season_progress'] = df['GW'] / df['GW'].max()
+    df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
+    #df =df.dropna(subset=['fixture_difficulty'])
+    return df
 
 def add_fixture_difficulty_to_dataframe(df, backend_root):
     """
@@ -123,317 +229,30 @@ def add_fixture_difficulty_to_dataframe(df, backend_root):
     return df_with_difficulty
 
 
-def filter_data(df): 
-    df.loc[df['position'].isin(['GK', 'GKP']), 'position'] = 'GK'
-    df.loc[df['total_points'] < 0, 'total_points'] = 0
-    df.loc[df['fixture_difficulty'] == 1, 'fixture_difficulty'] = 2
-    df = df[df['position'].isin(['GK', 'MID', 'DEF', 'FWD'])]
-    df = df[df['minutes'] > 0].copy()
-    df['season_progress'] = df['GW'] / df['GW'].max()
+def add_future_lagged_features(df, lagged_features=['was_home', 'fixture_difficulty']):
+    # Sort by player and gameweek to ensure proper ordering
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
     
-
+    for feature in lagged_features:
+        # Create lagged feature
+        df[f'lagged_{feature}'] = df.groupby(['element', 'season_x'])[feature].shift(1)
+        
+        # Fill NaN values with appropriate defaults - use proper pandas method
+        if feature == 'was_home':
+            # For boolean, use False as default (or the current value)
+            df[f'lagged_{feature}'] = df[f'lagged_{feature}'].fillna(df[feature]).infer_objects(copy=False)
+        elif feature == 'fixture_difficulty':
+            # Use average difficulty or current value
+            df[f'lagged_{feature}'] = df[f'lagged_{feature}'].fillna(df[feature]).infer_objects(copy=False)
+    
     return df
 
-def oversample_sequences_balanced(X_tensor, y_tensor, n_synthetic_per_percentile=200, n_percentiles=10):
-    """
-    Oversample sequences to create a balanced distribution across percentiles
-    
-    Args:
-        X_tensor: Input sequences
-        y_tensor: Target values
-        n_synthetic_per_percentile: Number of synthetic samples to generate per percentile
-        n_percentiles: Number of percentile bins to create (default: 10 for deciles)
-    
-    Returns:
-        X_combined: Original + synthetic sequences
-        y_combined: Original + synthetic targets
-    """
-    # Convert tensors to numpy for easier manipulation
-    X_np = X_tensor.numpy()
-    y_np = y_tensor.numpy().squeeze()
-    
-    # Calculate percentile boundaries
-    percentiles = np.linspace(0, 100, n_percentiles + 1)
-    percentile_bounds = np.percentile(y_np, percentiles)
-    
-    print(f"Creating balanced distribution across {n_percentiles} percentiles:")
-    for i in range(len(percentile_bounds) - 1):
-        print(f"  P{i*10}-{(i+1)*10}: {percentile_bounds[i]:.1f} - {percentile_bounds[i+1]:.1f}")
-    
-    synthetic_X = []
-    synthetic_y = []
-    
-    # Generate synthetic samples for each percentile bin
-    for i in range(len(percentile_bounds) - 1):
-        lower_bound = percentile_bounds[i]
-        upper_bound = percentile_bounds[i + 1]
-        
-        # Find samples in this percentile range
-        if i == len(percentile_bounds) - 2:  # Last bin, include upper bound
-            mask = (y_np >= lower_bound) & (y_np <= upper_bound)
-        else:
-            mask = (y_np >= lower_bound) & (y_np < upper_bound)
-        
-        percentile_X = X_np[mask]
-        percentile_y = y_np[mask]
-        
-        original_count = len(percentile_X)
-        print(f"  Percentile {i*10}-{(i+1)*10}: {original_count} original samples")
-        
-        if original_count == 0:
-            continue
-        
-        # Generate synthetic samples for this percentile
-        for j in range(n_synthetic_per_percentile):
-            # Randomly select a sample from this percentile as base
-            idx = np.random.randint(0, len(percentile_X))
-            base_X = percentile_X[idx].copy()
-            base_y = percentile_y[idx].copy()
-            
-            # Add controlled noise to features
-            for seq_idx in range(base_X.shape[0]):  # For each timeframe in sequence
-                for feat_idx in range(base_X.shape[1]):  # For each feature
-                    # Use feature values from the same percentile for noise calculation
-                    feature_values = percentile_X[:, seq_idx, feat_idx]
-                    if len(feature_values) > 1:
-                        noise_std = np.std(feature_values) * np.random.uniform(0.02, 0.08)
-                    else:
-                        # Fallback to global feature values if percentile has only 1 sample
-                        feature_values = X_np[:, seq_idx, feat_idx]
-                        noise_std = np.std(feature_values) * np.random.uniform(0.02, 0.08)
-                    
-                    noise = np.random.normal(0, noise_std)
-                    base_X[seq_idx, feat_idx] += noise
-            
-            # Add small noise to target while keeping it within percentile bounds
-            target_noise_std = (upper_bound - lower_bound) * 0.1  # 10% of percentile range
-            target_noise = np.random.normal(0, target_noise_std)
-            base_y += target_noise
-            
-            # Clip to stay within percentile bounds (with small tolerance)
-            tolerance = (upper_bound - lower_bound) * 0.05
-            base_y = np.clip(base_y, 
-                           max(0, lower_bound - tolerance), 
-                           min(np.max(y_np), upper_bound + tolerance))
-            
-            synthetic_X.append(base_X)
-            synthetic_y.append(base_y)
-    
-    if not synthetic_X:
-        print("No synthetic samples generated!")
-        return X_tensor, y_tensor
-    
-    # Convert back to tensors and combine
-    synthetic_X_tensor = torch.tensor(np.array(synthetic_X), dtype=torch.float32)
-    synthetic_y_tensor = torch.tensor(np.array(synthetic_y), dtype=torch.float32).unsqueeze(-1)
-    
-    # Combine original and synthetic
-    X_combined = torch.cat([X_tensor, synthetic_X_tensor], dim=0)
-    y_combined = torch.cat([y_tensor, synthetic_y_tensor], dim=0)
-    
-    print(f"\nBalanced oversampling results:")
-    print(f"Original sequences: {len(X_tensor)}")
-    print(f"Synthetic sequences: {len(synthetic_X_tensor)}")
-    print(f"Total sequences: {len(X_combined)}")
-    
-    # Analyze final distribution
-    analyze_distribution(y_combined.squeeze().numpy(), "Final Distribution")
-    
-    return X_combined, y_combined
-
-def analyze_distribution(y_values, title="Distribution"):
-    """Analyze and print distribution statistics"""
-    percentiles = [10, 20, 30, 40, 50, 60, 70, 80, 90]
-    percentile_values = np.percentile(y_values, percentiles)
-    
-    print(f"\n{title}:")
-    for i, (p, val) in enumerate(zip(percentiles, percentile_values)):
-        count = len(y_values[y_values <= val])
-        if i == 0:
-            prev_count = 0
-        else:
-            prev_count = len(y_values[y_values <= percentile_values[i-1]])
-        
-        bin_count = count - prev_count
-        print(f"  P{p:2d}: {val:5.1f} ({bin_count:4d} samples)")
-
-def oversample_sequences_adaptive(X_tensor, y_tensor, target_samples_per_bin=500, n_bins=10, min_original_samples=10):
-    """
-    Adaptive oversampling that brings all bins to the same sample count
-    
-    Args:
-        X_tensor: Input sequences
-        y_tensor: Target values
-        target_samples_per_bin: Target number of samples per bin
-        n_bins: Number of bins to create
-        min_original_samples: Minimum original samples required in bin to generate synthetic ones
-    """
-    X_np = X_tensor.numpy()
-    y_np = y_tensor.numpy().squeeze()
-    
-    # Create equal-width bins
-    y_min, y_max = y_np.min(), y_np.max()
-    bin_edges = np.linspace(y_min, y_max, n_bins + 1)
-    
-    print(f"Adaptive oversampling with {n_bins} bins, target: {target_samples_per_bin} samples per bin")
-    
-    synthetic_X = []
-    synthetic_y = []
-    
-    for i in range(len(bin_edges) - 1):
-        lower_bound = bin_edges[i]
-        upper_bound = bin_edges[i + 1]
-        
-        # Find samples in this bin
-        if i == len(bin_edges) - 2:  # Last bin
-            mask = (y_np >= lower_bound) & (y_np <= upper_bound)
-        else:
-            mask = (y_np >= lower_bound) & (y_np < upper_bound)
-        
-        bin_X = X_np[mask]
-        bin_y = y_np[mask]
-        original_count = len(bin_X)
-        
-        # Calculate how many synthetic samples needed
-        samples_needed = max(0, target_samples_per_bin - original_count)
-        
-        print(f"  Bin {i+1} [{lower_bound:.1f}-{upper_bound:.1f}]: {original_count} original, generating {samples_needed}")
-        
-        if samples_needed == 0 or original_count == 0:
-            continue
-        
-        # Skip bins with too few original samples
-        if original_count < min_original_samples:
-            print(f"    Skipping bin {i+1}: only {original_count} original samples (< {min_original_samples} minimum)")
-            continue
-        
-        # Generate synthetic samples for this bin
-        for j in range(samples_needed):
-            # Randomly select a sample from this bin as base
-            idx = np.random.randint(0, len(bin_X))
-            base_X = bin_X[idx].copy()
-            base_y = bin_y[idx].copy()
-            
-            # Add noise (similar to previous function)
-            for seq_idx in range(base_X.shape[0]):
-                for feat_idx in range(base_X.shape[1]):
-                    if len(bin_X) > 1:
-                        feature_values = bin_X[:, seq_idx, feat_idx]
-                        noise_std = np.std(feature_values) * np.random.uniform(0.03, 0.1)
-                    else:
-                        feature_values = X_np[:, seq_idx, feat_idx]
-                        noise_std = np.std(feature_values) * np.random.uniform(0.03, 0.1)
-                    
-                    noise = np.random.normal(0, noise_std)
-                    base_X[seq_idx, feat_idx] += noise
-            
-            # Add noise to target within bin bounds
-            bin_range = upper_bound - lower_bound
-            target_noise = np.random.normal(0, bin_range * 0.1)
-            base_y += target_noise
-            base_y = np.clip(base_y, lower_bound, upper_bound)
-            
-            synthetic_X.append(base_X)
-            synthetic_y.append(base_y)
-    
-    if not synthetic_X:
-        return X_tensor, y_tensor
-    
-    # Combine results
-    synthetic_X_tensor = torch.tensor(np.array(synthetic_X), dtype=torch.float32)
-    synthetic_y_tensor = torch.tensor(np.array(synthetic_y), dtype=torch.float32).unsqueeze(-1)
-    
-    X_combined = torch.cat([X_tensor, synthetic_X_tensor], dim=0)
-    y_combined = torch.cat([y_tensor, synthetic_y_tensor], dim=0)
-    
-    print(f"\nAdaptive oversampling results:")
-    print(f"Original: {len(X_tensor)}, Synthetic: {len(synthetic_X_tensor)}, Total: {len(X_combined)}")
-    
-    analyze_distribution(y_combined.squeeze().numpy(), "Final Balanced Distribution")
-    
-    return X_combined, y_combined
-
-def undersample_sequences_percentile(X_tensor, y_tensor, target_percentile=20, target_samples=1000):
-    """
-    Undersample sequences in a specific percentile range
-    
-    Args:
-        X_tensor: Input sequences
-        y_tensor: Target values
-        target_percentile: Percentile threshold below which to undersample (default: 20 = bottom 20%)
-        target_samples: Target number of samples to keep in the undersampled percentile
-    
-    Returns:
-        X_combined: Undersampled sequences
-        y_combined: Undersampled targets
-    """
-    X_np = X_tensor.numpy()
-    y_np = y_tensor.numpy().squeeze()
-    
-    # Calculate percentile threshold
-    percentile_threshold = np.percentile(y_np, target_percentile)
-    
-    # Split data into percentile groups
-    low_percentile_mask = y_np <= percentile_threshold
-    high_percentile_mask = y_np > percentile_threshold
-    
-    low_X = X_np[low_percentile_mask]
-    low_y = y_np[low_percentile_mask]
-    high_X = X_np[high_percentile_mask]
-    high_y = y_np[high_percentile_mask]
-    
-    original_low_count = len(low_X)
-    original_high_count = len(high_X)
-    
-    print(f"Undersampling bottom {target_percentile}% (scores ≤ {percentile_threshold:.1f}):")
-    print(f"  Original low percentile samples: {original_low_count}")
-    print(f"  Original high percentile samples: {original_high_count}")
-    
-    # Undersample the low percentile if it has more samples than target
-    if original_low_count > target_samples:
-        # Randomly select target_samples from low percentile
-        indices = np.random.choice(original_low_count, target_samples, replace=False)
-        undersampled_low_X = low_X[indices]
-        undersampled_low_y = low_y[indices]
-        print(f"  Undersampled to: {len(undersampled_low_X)} samples")
-    else:
-        undersampled_low_X = low_X
-        undersampled_low_y = low_y
-        print(f"  No undersampling needed (already ≤ {target_samples} samples)")
-    
-    # Combine undersampled low percentile with all high percentile samples
-    X_combined_np = np.concatenate([undersampled_low_X, high_X], axis=0)
-    y_combined_np = np.concatenate([undersampled_low_y, high_y], axis=0)
-    
-    # Convert back to tensors
-    X_combined = torch.tensor(X_combined_np, dtype=torch.float32)
-    y_combined = torch.tensor(y_combined_np, dtype=torch.float32).unsqueeze(-1)
-    
-    print(f"\nUndersampling results:")
-    print(f"Original total: {len(X_tensor)}")
-    print(f"Final total: {len(X_combined)}")
-    print(f"Removed: {len(X_tensor) - len(X_combined)} samples")
-    
-    analyze_distribution(y_combined.squeeze().numpy(), "Distribution After Undersampling")
-    
-    return X_combined, y_combined
-
-def split_data(df, train_ratio=0.7, val_ratio=0.15):
-    n = len(df)
-    train_end = int(train_ratio * n)
-    val_end = int((train_ratio + val_ratio) * n)
-
-    train_df = df.iloc[:train_end]
-    val_df = df.iloc[train_end:val_end]
-    test_df = df.iloc[val_end:]
-
-    print(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
-    return train_df, val_df, test_df
-
-
-
-def preprocess_data(df, scalers=None, encoders=None, fit=False):
+def preprocess_data(df, 
+                     min_max_features, 
+                     categorical_features, 
+                     metadata_features,
+                     binary_features, target,
+                     scalers=None, encoders=None, fit=False,):
     """
     Preprocess the dataframe by scaling continuous features and encoding categorical features.
     
@@ -452,8 +271,8 @@ def preprocess_data(df, scalers=None, encoders=None, fit=False):
     X_min_max = df[min_max_features]
     X_categorical = df[categorical_features]
     X_metadata = df[metadata_features]
+    X_binary = df[binary_features]
 
-    
     if fit:
         # Fit new scalers and encoders
         scalers = {}
@@ -482,152 +301,517 @@ def preprocess_data(df, scalers=None, encoders=None, fit=False):
     X_cat_df = pd.DataFrame(X_categorical_encoded, 
                            columns=encoders['categorical'].get_feature_names_out(categorical_features))
     X_metadata_df = pd.DataFrame(X_metadata.values, columns=metadata_features)
+    X_binary_df = pd.DataFrame(X_binary.values, columns=binary_features)
     target_df = pd.DataFrame(y.values, columns=[target])
     
-    X_processed = pd.concat([X_time_df, X_cont_df, X_cat_df, X_metadata_df,
-                             target_df], axis=1)
-    
+    X_processed = pd.concat([X_time_df, X_cont_df, X_cat_df, X_metadata_df, 
+                             X_binary_df, target_df], axis=1)
+
     if fit:
         return X_processed, scalers, encoders
     else:
         return X_processed
-    
 
-def create_sequences(df, past_sequences=5, future_sequences=3, min_sequences=1):
+def player_lag_features(gw_df, features, lags):
     """
-    Create sequences of data for each player based on the Gameweek (GW).
-    Supports variable-length sequences with left-padding for flexibility.
+    Create lagged features for each player in the dataframe. 
+    """
     
-    Args:
-        df: DataFrame with player data
-        past_sequences: Maximum number of past gameweeks to use (default: 5)
-        future_sequences: Number of future gameweeks to predict (default: 3)
-        min_sequences: Minimum number of past gameweeks required (default: 1)
+    out_df = gw_df.copy()
+    lagged_features = []
+    
+    # Sort the dataframe once at the beginning
+    out_df = out_df.sort_values(['season_x', 'GW']).reset_index(drop=True)
+    
+    for feature in features:
+            
+        for lag in lags:
+            
+            lagged_feature = 'last_' + str(lag) + '_' + feature
+            
+            if lag == 'all':
+                out_df[lagged_feature] = out_df.groupby(['season_x', 'element'])[feature]\
+                    .apply(lambda x: x.cumsum() - x).reset_index(level=[0, 1], drop=True)
+                
+            else:
+                out_df[lagged_feature] = out_df.groupby(['season_x', 'element'])[feature]\
+                    .apply(lambda x: x.rolling(min_periods=1, window=lag+1).sum() - x).reset_index(level=[0, 1], drop=True)
+
+            lagged_features.append(lagged_feature)
+    
+    return out_df, lagged_features
+
+
+def remove_correlated_features_advanced(df, threshold=0.95, method='pearson', 
+                                       priority_columns=None, exclude_columns=None):
+    """
+    Remove highly correlated features with priority system.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Input DataFrame
+    threshold : float, default=0.95
+        Correlation threshold above which features will be removed
+    method : str, default='pearson'
+        Correlation method ('pearson', 'kendall', 'spearman')
+    priority_columns : list, optional
+        Columns to prioritize keeping when choosing which to remove
+    exclude_columns : list, optional
+        Columns to exclude from correlation analysis (always keep)
     
     Returns:
-        X_tensor: Input sequences with left-padding for shorter sequences
-        y_tensor: Target sequences
+    --------
+    pandas.DataFrame : DataFrame with correlated features removed
+    dict : Dictionary with correlation info and removed columns
     """
-    # Sort to ensure features are always in same order
-    feature_cols = sorted([col for col in df.columns if col not in ['total_points', 'GW', 'element', 'name', 'season_x', 'team_x']])
+ 
+    # Handle exclusions
+    if exclude_columns is None:
+        exclude_columns = []
+    
+    # Only consider numeric columns, excluding specified ones
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    analysis_cols = [col for col in numeric_cols if col not in exclude_columns]
+    
+    # Calculate correlation matrix for analysis columns only
+    corr_matrix = df[analysis_cols].corr(method=method).abs()
+    
+    # Get upper triangle
+    upper_tri = corr_matrix.where(
+        np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+    )
+    
+    # Find highly correlated pairs
+    highly_correlated_pairs = []
+    to_drop = set()
+    
+    for col in upper_tri.columns:
+        for idx in upper_tri.index:
+            if upper_tri.loc[idx, col] > threshold:
+                corr_value = upper_tri.loc[idx, col]
+                highly_correlated_pairs.append((idx, col, corr_value))
+                
+                # Decide which to drop based on priority
+                if priority_columns:
+                    if idx in priority_columns and col not in priority_columns:
+                        to_drop.add(col)
+                    elif col in priority_columns and idx not in priority_columns:
+                        to_drop.add(idx)
+                    elif idx in priority_columns and col in priority_columns:
+                        # Both are priority, keep the one that appears first in priority list
+                        idx_priority = priority_columns.index(idx) if idx in priority_columns else float('inf')
+                        col_priority = priority_columns.index(col) if col in priority_columns else float('inf')
+                        if idx_priority < col_priority:
+                            to_drop.add(col)
+                        else:
+                            to_drop.add(idx)
+                    else:
+                        # Neither is priority, drop the second one
+                        to_drop.add(col)
+                else:
+                    # No priority system, drop the second column
+                    to_drop.add(col)
+    
+    # Create cleaned dataframe
+    df_cleaned = df.drop(columns=list(to_drop))
+    
+    # Prepare return info
+    result_info = {
+        'removed_columns': list(to_drop),
+        'highly_correlated_pairs': highly_correlated_pairs,
+        'original_shape': df.shape,
+        'cleaned_shape': df_cleaned.shape,
+        'threshold': threshold
+    }
+    
+    print(f"Correlation analysis complete:")
+    print(f"  - Found {len(highly_correlated_pairs)} pairs with correlation > {threshold}")
+    print(f"  - Removed {len(to_drop)} columns")
+    print(f"  - Shape: {df.shape} -> {df_cleaned.shape}")
+    
+    return df_cleaned, result_info
+
+
+def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, padding_strategy='aggressive'):
+    """
+    Create sequences of data for each player with mapping information.
+    
+    Parameters:
+    -----------
+    padding_strategy : str
+        'conservative' - Only pad early gameweeks (original behavior)
+        'aggressive' - Add more padding throughout training to help model learn with limited data
+    
+    For aggressive padding strategy:
+    - Creates multiple padded versions for early gameweeks
+    - Adds random padding to later gameweeks to simulate missing data scenarios
+    - Helps model learn to handle incomplete historical information
+    
+    Returns:
+        X_tensor: Input sequences
+        y_tensor: Target sequences  
+        mapping_df: DataFrame with player/GW info for each sequence
+    """
+    feature_cols = sorted([col for col in df.columns if col not in ['total_points', 'GW', 'element', 'name', 'season_x', 'team_x', 'minutes']])
     X_seq, y_seq = [], []
+    mapping_info = []
+    
+    num_features = len(feature_cols)
+
+    for player_id, stats in df.groupby(['element', 'season_x']):
+        group = stats.sort_values('GW').reset_index(drop=True)
+    
+        # Standard sequences (same as before)
+        for i in range(len(group) - future_sequences + 1):
+            target_start_idx = i + 1
+            
+            # Skip if we don't have enough future data
+            if target_start_idx + future_sequences - 1 >= len(group):
+                continue
+            
+            # Determine how much historical data we have available
+            available_history = i + 1  # +1 because we include the current gameweek
+            
+            if available_history >= past_sequences:
+                # We have enough history, take the last 'past_sequences' gameweeks
+                sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
+            else:
+                # We need padding for early gameweeks
+                actual_data = group.iloc[0:i + 1][feature_cols].values
+                padding_needed = past_sequences - available_history
+                
+                # Create padded sequence: zeros + actual data
+                padded_sequence = np.zeros((past_sequences, num_features))
+                padded_sequence[padding_needed:] = actual_data
+                sequence_data = padded_sequence
+            
+            # Get target values
+            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+            
+            if len(target) != future_sequences:
+                continue
+                
+            X_seq.append(sequence_data)
+            y_seq.append(target)
+            
+            # Store mapping information for the prediction gameweek
+            prediction_gw = group.iloc[target_start_idx]['GW']
+            mapping_info.append({
+                'sequence_idx': len(X_seq) - 1,
+                'element': player_id[0],
+                'season_x': player_id[1],
+                'name': group.iloc[target_start_idx]['name'],
+                'prediction_gw': prediction_gw,
+                'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
+                'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                'sequence_type': 'standard'
+            })
+        
+        # Aggressive padding strategy - add extra padded sequences
+        if padding_strategy == 'aggressive' and len(group) >= past_sequences:
+            
+            # Add sequences with artificial padding for mid-season scenarios
+            # This simulates situations where we have limited historical data due to transfers, injuries, etc.
+            
+            for i in range(past_sequences, min(len(group) - future_sequences + 1, 20)):  # Limit to first 20 GWs
+                target_start_idx = i + 1
+                
+                if target_start_idx + future_sequences - 1 >= len(group):
+                    continue
+                
+                # Create sequences with different amounts of artificial padding
+                for padding_amount in [1, 2, 3]:  # Add 1, 2, or 3 steps of padding
+                    if i + 1 - padding_amount <= 0:
+                        continue
+                    
+                    # Take less historical data and pad the beginning
+                    actual_history_length = past_sequences - padding_amount
+                    actual_data = group.iloc[i + 1 - actual_history_length:i + 1][feature_cols].values
+                    
+                    # Create padded sequence
+                    padded_sequence = np.zeros((past_sequences, num_features))
+                    padded_sequence[padding_amount:] = actual_data
+                    
+                    # Get target values
+                    target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+                    
+                    if len(target) != future_sequences:
+                        continue
+                    
+                    X_seq.append(padded_sequence)
+                    y_seq.append(target)
+                    
+                    # Store mapping information
+                    prediction_gw = group.iloc[target_start_idx]['GW']
+                    mapping_info.append({
+                        'sequence_idx': len(X_seq) - 1,
+                        'element': player_id[0],
+                        'season_x': player_id[1],
+                        'name': group.iloc[target_start_idx]['name'],
+                        'prediction_gw': prediction_gw,
+                        'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                        'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                        'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                        'padding_used': padding_amount,
+                        'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                        'sequence_type': f'artificial_padding_{padding_amount}'
+                    })
+            
+            # Add sequences simulating "new player" scenarios (heavy padding)
+            # Take a few mid-season predictions and treat them as if the player just started
+            for i in [10, 15, 20, 25]:  # Sample some mid-season gameweeks
+                if i >= len(group) - future_sequences + 1:
+                    continue
+                
+                target_start_idx = i + 1
+                if target_start_idx + future_sequences - 1 >= len(group):
+                    continue
+                
+                # Create heavily padded sequences (simulating new players)
+                for simulated_history in [1, 2]:  # Simulate having only 1-2 games of history
+                    actual_data = group.iloc[i + 1 - simulated_history:i + 1][feature_cols].values
+                    padding_needed = past_sequences - simulated_history
+                    
+                    padded_sequence = np.zeros((past_sequences, num_features))
+                    padded_sequence[padding_needed:] = actual_data
+                    
+                    target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+                    
+                    if len(target) != future_sequences:
+                        continue
+                    
+                    X_seq.append(padded_sequence)
+                    y_seq.append(target)
+                    
+                    prediction_gw = group.iloc[target_start_idx]['GW']
+                    mapping_info.append({
+                        'sequence_idx': len(X_seq) - 1,
+                        'element': player_id[0],
+                        'season_x': player_id[1],
+                        'name': group.iloc[target_start_idx]['name'],
+                        'prediction_gw': prediction_gw,
+                        'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                        'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                        'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                        'padding_used': padding_needed,
+                        'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                        'sequence_type': f'new_player_sim_{simulated_history}'
+                    })
+    
+    X_tensor = torch.tensor(np.array(X_seq), dtype=torch.float32)
+    y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
+    mapping_df = pd.DataFrame(mapping_info)
+    
+    return X_tensor, y_tensor, mapping_df
+
+
+#should really have train and test sequences in the same function
+def create_sequences_test(df, past_sequences=5, future_sequences=3, min_sequences=1):
+    """
+    Create sequences of data for each player with mapping information.
+    For early gameweeks, pad with zeros:
+    - GW1 prediction: 4 zeros + GW1 data
+    - GW2 prediction: 3 zeros + GW1-GW2 data  
+    - GW3 prediction: 2 zeros + GW1-GW3 data
+    - GW4 prediction: 1 zero + GW1-GW4 data
+    - GW5+ prediction: GW(n-4) to GW(n) data (no padding)
+    
+    Returns:
+        X_tensor: Input sequences
+        y_tensor: Target sequences  
+        mapping_df: DataFrame with player/GW info for each sequence
+    """
+    feature_cols = sorted([col for col in df.columns if col not in ['total_points', 'GW', 'element', 'name', 'season_x', 'team_x', 'minutes']])
+    X_seq, y_seq = [], []
+    mapping_info = []
     
     num_features = len(feature_cols)
 
     for player_id, stats in df.groupby(['element', 'season_x']):
         group = stats.sort_values('GW').reset_index(drop=True)
         
-        # Iterate through the group to create sequences
-        for i in range(min_sequences - 1, len(group) - future_sequences):
-            # Determine the actual number of past gameweeks available for this sequence
-            actual_past_available = min(i + 1, past_sequences)
-            
-            # Start index for actual sequence data
-            start_idx_actual = i - actual_past_available + 1
-            
-            sequence_data = group.iloc[start_idx_actual : i + 1][feature_cols].values
-            
-            # Create the final sequence
-            if len(sequence_data) < past_sequences:
-                # Need padding - create padded sequence with zeros on the left
-                padded_sequence = np.zeros((past_sequences, num_features))
-                padding_needed = past_sequences - len(sequence_data)
-                padded_sequence[padding_needed:] = sequence_data
-            else:
-                # No padding needed - use the last 'past_sequences' rows
-                padded_sequence = sequence_data[-past_sequences:]
-            
-            # Get target and future fixture difficulty
+        # Start from the first gameweek (index 0) and create sequences
+        for i in range(len(group) - future_sequences + 1):
+            # For predictions, we need the next gameweek(s) after position i
             target_start_idx = i + 1
-            target = group.iloc[target_start_idx : target_start_idx + future_sequences]['total_points'].values
             
-            # Ensure target and future_fd have the correct length
+            # Skip if we don't have enough future data
+            if target_start_idx + future_sequences - 1 >= len(group):
+                continue
+            
+            # Determine how much historical data we have available
+            available_history = i + 1  # +1 because we include the current gameweek
+            
+            if available_history >= past_sequences:
+                # We have enough history, take the last 'past_sequences' gameweeks
+                sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
+            else:
+                # We need padding for early gameweeks
+                actual_data = group.iloc[0:i + 1][feature_cols].values
+                padding_needed = past_sequences - available_history
+                
+                # Create padded sequence: zeros + actual data
+                padded_sequence = np.zeros((past_sequences, num_features))
+                padded_sequence[padding_needed:] = actual_data
+                sequence_data = padded_sequence
+            
+            # Get target values
+            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+            
             if len(target) != future_sequences:
                 continue
                 
-            X_seq.append(padded_sequence)
+            X_seq.append(sequence_data)
             y_seq.append(target)
+            
+            # Store mapping information for the prediction gameweek
+            prediction_gw = group.iloc[target_start_idx]['GW']
+            mapping_info.append({
+                'sequence_idx': len(X_seq) - 1,
+                'element': player_id[0],
+                'season_x': player_id[1],
+                'name': group.iloc[target_start_idx]['name'],
+                'prediction_gw': prediction_gw,
+                'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
+                'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None
+            })
     
-    # Convert to numpy arrays
-    X_np = np.array(X_seq)
-    y_np = np.array(y_seq)
-
-    # Convert to tensors
-    X_tensor = torch.tensor(X_np, dtype=torch.float32)
-    y_tensor = torch.tensor(y_np, dtype=torch.float32)
-
-    return X_tensor, y_tensor
+    X_tensor = torch.tensor(np.array(X_seq), dtype=torch.float32)
+    y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
+    mapping_df = pd.DataFrame(mapping_info)
+    
+    return X_tensor, y_tensor, mapping_df
 
 
 def main():
-    base_path = os.getcwd() + "/backend/predictor/"
-    #backend_root = os.path.dirname(base_path)
-
+    base_path = os.getcwd() + '/backend/predictor/'
     file_path = os.path.join(base_path, "data/cleaned_merged_seasons.csv")
-    df = pd.read_csv(file_path)
-    df = df[df['season_x'].isin(['2024-25', '2023-24', '2022-23'])].copy() #only seasons with xG
+    data = pd.read_csv(file_path)
 
-    df_enhanced = add_fixture_difficulty_to_dataframe(df, base_path)
+    data = data.rename(columns={
+    'selected': 'chosen_by',
+    })
 
-    df_filtered = filter_data(df_enhanced)
+    club_encoder = LabelEncoder()
+    opp_encoder = LabelEncoder()
+    data["club_encoded"] = club_encoder.fit_transform(data["team_x"])
+    data["opponent_encoded"] = opp_encoder.fit_transform(data["opp_team_name"])
+    data["position_encoded"] = data["position"].map(position_mapping)
+    data['result_encoded'] = data.apply(create_result_column, axis=1)
 
-    train_df, val_df, test_df = split_data(df_filtered)
+    data['name'] = data.name.str.replace('_\d+','')
+    data['name'] = data['name'].str.replace(" ", "_").str.replace("-", "_").str.replace('_\d+','')
+    data['name'] = data['name'].apply(lambda x: unidecode.unidecode(x))
+    data['name'] = data['name'].str.lower()
 
-    # Preprocess data
-    processed_train_df, scalers, encoders = preprocess_data(train_df, fit=True)
-    processed_val_df = preprocess_data(val_df, scalers=scalers, encoders=encoders, fit=False)
-    processed_test_df = preprocess_data(test_df, scalers=scalers, encoders=encoders, fit=False)
+    data = fix_gameweek_labels(data)
 
-    # Oversample training data
-    #processed_train_df = oversample_data(processed_train_df[:100], target_col='total_points')
+    data = data[data['GW'] <= 38]
 
-    X_train, y_train = create_sequences(
-    processed_train_df, 
-    past_sequences=5, 
-    future_sequences=1, 
-    min_sequences=1 
-)
-    X_val, y_val = create_sequences(
-    processed_val_df, 
-    past_sequences=5, 
-    future_sequences=1, 
-    min_sequences=1
-)
-    X_test, y_test = create_sequences(
-    processed_test_df, 
-    past_sequences=5, 
-    future_sequences=1, 
-    min_sequences=1
-)
+    data = add_fixture_difficulty_to_dataframe(data, base_path)
+
+    data = filter_data(data)
+
+    data, lagged_features = player_lag_features(data, player_features_to_lag, [1, 3, 5,'all'])
+
+    data = add_future_lagged_features(data)
+    #include new lagged features
+    lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded"])
+
+    target = ["total_points"]
+
+
+    categorical_features = ["position_encoded", "was_home"]
+    continuous_features = [col for col in lagged_features if col not in categorical_features + target]
+    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
     
-    X_train, y_train = undersample_sequences_percentile(
-        X_train, y_train, 
-        target_percentile=60, 
-        target_samples=4000
+    #should normalize based on the training data only, but this is not done here
+    seasons = np.unique(data["season_x"])
+    number_of_training_seasons = len(seasons) - 2
+    train_seasons = seasons[:number_of_training_seasons]
+    val_seasons = seasons[number_of_training_seasons:number_of_training_seasons + 1]
+    test_seasons = seasons[number_of_training_seasons + 1:]
+    train = data[data["season_x"].isin(train_seasons)]
+    val = data[data["season_x"].isin(val_seasons)]
+    test = data[data["season_x"].isin(test_seasons)]
+
+    train, scalers, encoders = preprocess_data(data, min_max_features=continuous_features, categorical_features=[], target="total_points",
+                                binary_features=categorical_features, metadata_features=meta_data, fit=True)
+                                #this is confusing, binary features means nothing happens and these columns are already ready
+    
+    val = preprocess_data(val, min_max_features=continuous_features, categorical_features=[], target="total_points",
+                                binary_features=categorical_features, metadata_features=meta_data, fit=False,
+                                scalers=scalers, encoders=encoders)
+    test = preprocess_data(test, min_max_features=continuous_features, categorical_features=[], target="total_points",
+                                binary_features=categorical_features, metadata_features=meta_data, fit=False,
+                                scalers=scalers, encoders=encoders)
+
+    _, removed_features = remove_correlated_features_advanced(
+    train[lagged_features], 
+    threshold=0.9,
     )
 
-    # Oversample high-performing sequences
-    X_train, y_train = oversample_sequences_adaptive(
-        X_train, y_train, 
-        target_samples_per_bin=5000,  
-        n_bins=4,
-        min_original_samples=500
+    # Update lagged_features to only include remaining features
+    remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
+    pickle.dump(remaining_lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
+    
+    needed_features = ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes'] + remaining_lagged_features
+
+    for col in [col for col in needed_features if col not in ['season_x', 'name']]:
+        train[col] = train[col].astype(float)
+        val[col] = val[col].astype(float)
+        test[col] = test[col].astype(float)
+
+    #also save data pre-sequences
+    output_dir = os.path.join(base_path, "processed_data")
+    train.to_csv(os.path.join(output_dir, "train_data.csv"), index=False)
+    val.to_csv(os.path.join(output_dir, "val_data.csv"), index=False)
+    test.to_csv(os.path.join(output_dir, "test_data.csv"), index=False)
+
+    X_train, y_train, train_mapping = create_sequences_train(
+        train[needed_features], 
+        past_sequences=5, 
+        future_sequences=1, 
+        min_sequences=1,
     )
 
-    print(f"Train sequences: {X_train.shape}, Targets: {y_train.shape}")
-    print(f"Val sequences: {X_val.shape}, Targets: {y_val.shape}")
-    print(f"Test sequences: {X_test.shape}, Targets: {y_test.shape}")
+    X_val, y_val, val_mapping = create_sequences_test(
+        val[needed_features], 
+        past_sequences=5, 
+        future_sequences=1, 
+        min_sequences=1,
+    )
 
-    # Save processed data
-    torch.save((X_train, y_train), base_path + 'final_data/train_sequences.pt')
-    torch.save((X_val, y_val), base_path + 'final_data/val_sequences.pt')
-    torch.save((X_test, y_test), base_path + 'final_data/test_sequences.pt')
+    X_test, y_test, test_mapping = create_sequences_test(
+        test[needed_features], 
+        past_sequences=5, 
+        future_sequences=1, 
+        min_sequences=1,
+    )
 
-    print("Data preparation complete. Sequences saved to disk.")
+    # Save processed sequence data
+
+    torch.save(X_train, os.path.join(output_dir, "X_train.pt"))
+    torch.save(y_train, os.path.join(output_dir, "y_train.pt"))
+    train_mapping.to_csv(os.path.join(output_dir, "train_mapping.csv"), index=False)
+
+    torch.save(X_val, os.path.join(output_dir, "X_val.pt"))
+    torch.save(y_val, os.path.join(output_dir, "y_val.pt"))
+    val_mapping.to_csv(os.path.join(output_dir, "val_mapping.csv"), index=False)
+
+    torch.save(X_test, os.path.join(output_dir, "X_test.pt"))
+    torch.save(y_test, os.path.join(output_dir, "y_test.pt"))
+    test_mapping.to_csv(os.path.join(output_dir, "test_mapping.csv"), index=False)
+
 
 
 if __name__ == "__main__":
     main()
-
-
-
+    print("Preprocessing complete. Processed data saved to 'processed' directory.")

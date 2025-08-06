@@ -12,7 +12,7 @@ class Seq2OutputDataset(Dataset):
     def __init__(self, X, y, transform=False):
         self.X = X
         if transform:
-            self.y = torch.log1p(y)
+            self.y = torch.log1p(y) 
         else:
             self.y = y
 
@@ -106,6 +106,7 @@ def train_model(
                     'scheduler_state_dict': scheduler.state_dict(),
                     'epoch': epoch,
                     'best_performance': best_performance,
+                    'input_dim': model.input_dim,
                     'hidden_dim': model.hidden_dim,
                     'num_layers': model.num_layers,
                     'num_fc_layers': model.num_fc_layers}
@@ -195,3 +196,36 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
     print(f"Best RMSE: {best_rmse:.4f}")
     
     return best_params
+
+
+if __name__ == "__main__":
+    base_path = os.getcwd() + '/backend/predictor'
+    data_path = os.path.join(base_path, 'processed_data')
+    X_train = torch.load(data_path + '/X_train.pt', weights_only=True)
+    y_train = torch.load(data_path + '/y_train.pt', weights_only=True)
+    X_val = torch.load(data_path + '/X_val.pt', weights_only=True)
+    y_val = torch.load(data_path + '/y_val.pt', weights_only=True)
+
+    input_dim = X_train.shape[-1]
+    print(f"Input dimension: {input_dim}")
+
+    model = AdvancedLSTM(
+        input_dim=input_dim, 
+        hidden_dim=64, 
+        output_dim=1,
+        num_layers=1,
+        dropout=0.2,
+        num_fc_layers=1
+    )
+    train_model(
+        model,
+        X_train=X_train, 
+        y_train=y_train,
+        X_val=X_val, 
+        y_val=y_val,
+        epochs=20,
+        learning_rate=1e-3,
+        weight_decay=1e-4,
+        batch_size=64,
+        verbose=2,
+    )

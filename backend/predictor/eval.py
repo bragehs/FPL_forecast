@@ -1,349 +1,541 @@
-import torch
-import torch.nn as nn
-import numpy as np
-from model import AdvancedLSTM, LSTMEncoderOnly
+import pulp
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
+import os
+import torch
 
+data_path = os.getcwd() + '/processed_data'
 
-def create_inference_sequence(player_data, feature_cols, max_sequences=5):
-    """
-    Create a single padded sequence for inference when you have variable amounts of historical data.
+def make_available_players_df(this_season_player_df, last_season_player_df):
     
-    Args:
-        player_data: DataFrame with player's historical data (sorted by GW)
-        feature_cols: List of feature columns to include
-        max_sequences: Maximum sequence length (will pad to this length)
+    last_season_player_df = last_season_player_df[last_season_player_df.minutes > 0]
+    last_season_player_df = last_season_player_df[['name', "total_points"]]
+    last_season_player_df.rename(columns={'total_points': "total_points_last_season"},
+                                inplace=True)
     
-    Returns:
-        padded_sequence: numpy array with shape (max_sequences, num_features)
-    """
-    # Get the feature data
-    sequence_data = player_data[feature_cols].values
-    num_features = len(feature_cols)
-    
-    # Create padded sequence with zeros on the left
-    padded_sequence = np.zeros((max_sequences, num_features))
-    
-    # Determine how much padding is needed
-    actual_length = min(len(sequence_data), max_sequences)
-    padding_needed = max_sequences - actual_length
-    
-    if padding_needed > 0:
-        # Left-pad with zeros
-        padded_sequence[padding_needed:] = sequence_data[-actual_length:]
-    else:
-        # Take the last max_sequences if we have more data than needed
-        padded_sequence = sequence_data[-max_sequences:]
-    
-    return padded_sequence
+    available_players_df = pd.merge(this_season_player_df,
+                                    last_season_player_df,
+                                   on='name', how='left')
 
-def load_model(model_path):
-    """Load the trained model"""
-    model_data = torch.load(model_path, map_location='cpu')
-    model = AdvancedLSTM(
-            input_dim=26,
-            hidden_dim=model_data['hidden_dim'],
-            output_dim=1,
-            num_layers=model_data['num_layers'],
-            num_fc_layers=model_data['num_fc_layers']
-        ) 
-    model.load_state_dict(model_data['model_state_dict'])
-    model.eval()
-    return model
-
-def analyze_padding(X_tensor):
-    """
-    Analyze padding in sequences and return indices for each padding level
-    """
-    padding_info = []
+    # First attempt: fill by position and value groups
+    available_players_df['total_points_last_season'] = available_players_df.groupby(['position_encoded', 'value'])['total_points_last_season'].transform(lambda x: x.fillna(x.mean()))
     
-    for i in range(X_tensor.shape[0]):
-        sequence = X_tensor[i]
-        # Count rows that are all zeros (padding)
-        zero_rows = (sequence == 0).all(axis=1)
-        num_padding = zero_rows.sum().item()
-        actual_data_rows = X_tensor.shape[1] - num_padding
+    # Second attempt: fill by position only if still NaN
+    available_players_df['total_points_last_season'] = available_players_df.groupby(['position_encoded'])['total_points_last_season'].transform(lambda x: x.fillna(x.mean()))
+    
+    nan_values = available_players_df[available_players_df['total_points_last_season'].isna()]
+    print("Players with NaN total_points_last_season:", nan_values['name'].unique())
+    print("Number of NaN values remaining:", len(nan_values))
+    
+    return available_players_df
+
+def get_cheapest_players(player_df):
+    
+    cheapest_player_names = []
+    total_cost = 0
+    
+    # for each position, sort the players by cost (in ascending order)
+    # then, get the player with the most number of points
+    
+    for position, group in player_df.groupby('position_encoded'):
+        cheapest_players =  group[(group.value == group.value.min())]
+        top_cheapest_player = cheapest_players[cheapest_players['total_points'] == cheapest_players['total_points'].max()]
+
+        cheapest_player_name = top_cheapest_player['name'].values[0]
         
-        padding_info.append({
-            'sequence_idx': i,
-            'actual_data_rows': actual_data_rows,
-            'padding_rows': num_padding
-        })
-    
-    return padding_info
-
-def get_predictions(model, X_tensor, batch_size=64):
-    """Get predictions for all sequences"""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    
-    predictions = []
-    
-    with torch.no_grad():
-        for i in range(0, len(X_tensor), batch_size):
-            batch = X_tensor[i:i+batch_size].to(device)
-            pred = model(batch)
-            transformed_pred = torch.expm1(pred)
-            predictions.append(pred.cpu())
-
-    return torch.cat(predictions, dim=0)
-
-def evaluate_by_padding_level(y_true, y_pred, padding_info):
-    """Evaluate performance by padding level"""
-    mae_fn = nn.L1Loss()
-    mse_fn = nn.MSELoss()
-    
-    results = {}
-    
-    # Group by actual data rows
-    for data_rows in range(1, 6):  # 1 to 5 data rows
-        indices = [info['sequence_idx'] for info in padding_info 
-                  if info['actual_data_rows'] == data_rows]
+        cheapest_player_names += [cheapest_player_name]
+        total_cost += top_cheapest_player.value.values[0]
         
-        if len(indices) > 0:
-            y_true_subset = (y_true[indices])
-            y_pred_subset = (y_pred[indices])
-            
-            mae = mae_fn(y_pred_subset, y_true_subset).item()
-            rmse = torch.sqrt(mse_fn(y_pred_subset, y_true_subset)).item()
-            
-            results[data_rows] = {
-                'count': len(indices),
-                'mae': mae,
-                'rmse': rmse,
-                'percentage': (len(indices) / len(y_true)) * 100
-            }
-    
-    return results
+        print(position, ": ", cheapest_player_name )
+        
+    return cheapest_player_names, total_cost
 
-def evaluate_by_target_range(y_true, y_pred, ranges=[(0, 2), (2, 4), (4, 6), (6, 10), (10, float('inf'))]):
-    """Evaluate performance by target value ranges"""
-    mae_fn = nn.L1Loss()
-    mse_fn = nn.MSELoss()
+
+def make_decision_variables(player_df):
+    return [pulp.LpVariable(i, cat="Binary") for i in player_df['name']]
+
+
+def make_optimization_function(player_df, decision_variables):
+    op_func = ""
+
+    for i, player in enumerate(decision_variables):
+        op_func += player_df.total_points_last_season[i] * player
+
+    return op_func
+
+
+def make_cash_constraint(player_df, decision_variables, available_cash):
+    total_paid = ""
+    for rownum, row in player_df.iterrows():
+        for i, player in enumerate(decision_variables):
+            if rownum == i:
+                formula = row['value']*player
+                total_paid += formula
+
+    return (total_paid <= available_cash)
+
+
+def make_player_constraint(position, n, decision_variables, player_df):
     
-    results = {}
+    total_n = ""
     
-    for min_val, max_val in ranges:
-        # Handle the case where y_true might be 2D
-        if y_true.dim() > 1:
-            y_true_flat = y_true.squeeze()
-            y_pred_flat = y_pred.squeeze()
+    player_positions = player_df.position_encoded
+    
+    for i, player in enumerate(decision_variables):
+        if player_positions[i] == position:
+            total_n += 1*player
+            
+    return(total_n == n)
+
+
+def add_team_constraint(prob, player_df, decision_variables):
+
+    for team, group in player_df.groupby('team_x'):
+        team_total = ''
+        
+        for player in decision_variables:
+            if player.name in group['name'].values:
+                formula = 1*player
+                team_total += formula
+                
+        
+        prob += (team_total <= 3)
+
+
+def solve_optimization_problem(available_players_df, bench_cost):
+
+    available_cash = 1000 - bench_cost
+
+    prob = pulp.LpProblem('InitialTeam', pulp.LpMaximize)
+    print("Available cash:", available_cash)
+    decision_variables = make_decision_variables(available_players_df)
+    print("Decision variables:", decision_variables)
+    prob += make_optimization_function(available_players_df, decision_variables)
+    print("Optimization function:", prob.objective)
+    prob += make_cash_constraint(available_players_df, decision_variables, available_cash)
+    prob += make_player_constraint(0, 1, decision_variables, available_players_df) 
+    prob += make_player_constraint(1, 4, decision_variables, available_players_df) 
+    prob += make_player_constraint(2, 4, decision_variables, available_players_df) 
+    prob += make_player_constraint(3, 2, decision_variables, available_players_df)
+
+    add_team_constraint(prob, available_players_df, decision_variables)
+
+    prob.writeLP('InitialTeam.lp')
+    prob.solve()
+
+    return prob
+
+
+def get_initial_team(prob, player_df):
+    variable_names = [v.name for v in prob.variables()]
+    variable_values = [v.varValue for v in prob.variables()]
+
+    # Create the decision variables DataFrame
+    decision_df = pd.DataFrame({"name": variable_names, "selected": variable_values})
+
+    # Perform merge
+    initial_team = pd.merge(decision_df, player_df, on="name", how='left')
+    initial_team = initial_team[initial_team["selected"] == 1.0]
+
+    return initial_team
+
+
+def make_predicted_table(y_test, y_pred, gw_df):
+    '''
+    Create a DataFrame for LSTM model predictions.
+    This needs to keep track of the Gameweek (GW) and player names.
+    '''
+    test_mapping = pd.read_csv(data_path + '/test_mapping.csv')
+    predictions_df = test_mapping.copy()
+    predictions_df['actual'] = y_test
+    predictions_df['predicted'] = y_pred 
+    #predictions_df = predictions_df[predictions_df['minutes'] > 0]  # filter out players who did not play
+    predictions_df.rename(columns={'prediction_gw': 'GW'}, inplace=True)
+    gameweek_1 = gw_df[gw_df['GW'] == 1][['name', 'total_points', 'value', 'GW', 'element', 'season_x', 'team_x', 'minutes', 'position_encoded']].copy()
+    gameweek_1 = gameweek_1[gameweek_1['minutes'] > 0]  # filter out players who did not play
+
+    # Add the missing columns to match predictions_df structure
+    gameweek_1['actual'] = gameweek_1['total_points']
+    gameweek_1['predicted'] = np.nan
+    gameweek_1['sequence_idx'] = np.nan  # No sequence for GW1
+    gameweek_1['padding_used'] = np.nan  # No padding info for GW1
+
+    # Reorder columns to match predictions_df
+    gameweek_1 = gameweek_1[['sequence_idx', 'element', 'season_x', 'name', 'GW', 'team_x', 'value', 'minutes', 'padding_used', 'actual', 'predicted']]
+
+    # Combine with existing predictions_df
+    predictions_df_complete = pd.concat([gameweek_1, predictions_df], ignore_index=True)
+
+    # Sort by player and gameweek for better organization
+    predictions_df_complete = predictions_df_complete.sort_values(['name', 'GW']).reset_index(drop=True)
+
+    # Update the predictions_df reference
+    predictions_df = predictions_df_complete
+    predictions_df = predictions_df.drop_duplicates(subset=['name', 'GW'], keep='last')
+    
+    return predictions_df
+
+
+def get_suggested_transfer(predicted_df, team_list, current_money):
+    
+    predicted_diff = 0
+    money_change = 0
+    suggested_in = ''
+    suggested_out = ''
+    team_df = predicted_df[(predicted_df['name'].isin(team_list))]
+
+
+    teams_dict = {}
+    for i, row in team_df.iterrows():
+        if row.team_x not in teams_dict:
+            teams_dict[row.team_x] = [row['name']]
         else:
-            y_true_flat = y_true
-            y_pred_flat = y_pred
-            
-        if max_val == float('inf'):
-            mask = y_true_flat >= min_val
-            range_label = f"{min_val}+"
-        else:
-            mask = (y_true_flat >= min_val) & (y_true_flat < max_val)
-            range_label = f"{min_val}-{max_val}"
-        
-        if mask.sum() > 0:
-            y_true_subset = y_true_flat[mask]
-            y_pred_subset = y_pred_flat[mask]
-            
-            mae = mae_fn(y_pred_subset, y_true_subset).item()
-            rmse = torch.sqrt(mse_fn(y_pred_subset, y_true_subset)).item()
-            
-            results[range_label] = {
-                'count': mask.sum().item(),
-                'mae': mae,
-                'rmse': rmse,
-                'percentage': (mask.sum().item() / len(y_true_flat)) * 100,
-                'mean_actual': y_true_subset.mean().item(),
-                'mean_predicted': y_pred_subset.mean().item()
-            }
-    
-    return results
+            teams_dict[row.team_x].append(row['name'])
 
-def analyze_prediction_distribution(y_pred, ranges=[(0, 2), (2, 4), (4, 6), (6, 10), (10, float('inf'))]):
-    """Analyze how often the model predicts values in each range"""
-    if y_pred.dim() > 1:
-        y_pred_flat = y_pred.squeeze()
-    else:
-        y_pred_flat = y_pred
-    
-    results = {}
-    total_predictions = len(y_pred_flat)
-    
-    for min_val, max_val in ranges:
-        if max_val == float('inf'):
-            mask = y_pred_flat >= min_val
-            range_label = f"{min_val}+"
-        else:
-            mask = (y_pred_flat >= min_val) & (y_pred_flat < max_val)
-            range_label = f"{min_val}-{max_val}"
-        
-        count = mask.sum().item()
-        percentage = (count / total_predictions) * 100
-        
-        results[range_label] = {
-            'count': count,
-            'percentage': percentage
-        }
-    
-    return results
 
-def main():
-    # Load test data
-    print("Loading test data...")
-    X_test, y_test = torch.load("/Users/bragehs/Documents/FPL_forecast/backend/predictor/final_data/test_sequences.pt", weights_only=True)
-    print(f"Test sequences: {X_test.shape}, Targets: {y_test.shape}")
-    
-    # Load best model (you may need to adjust these parameters based on your actual model)
-    print("Loading best model...")
-    model = load_model("/Users/bragehs/Documents/FPL_forecast/backend/predictor/best_model.pth")
-    print("Model loaded successfully!")
-    
-    # Get predictions
-    print("Generating predictions...")
-    y_pred = get_predictions(model, X_test)
-    
-    # Overall performance
-    mae_fn = nn.L1Loss()
-    mse_fn = nn.MSELoss()
-    
-    overall_mae = mae_fn(y_pred, y_test).item()
-    overall_rmse = torch.sqrt(mse_fn(y_pred, y_test)).item()
-    
-    print("\n" + "="*60)
-    print("OVERALL PERFORMANCE")
-    print("="*60)
-    print(f"MAE:  {overall_mae:.4f}")
-    print(f"RMSE: {overall_rmse:.4f}")
-    print(f"Total test samples: {len(y_test):,}")
-    
-    # Analyze padding
-    print("\nAnalyzing padding levels...")
-    padding_info = analyze_padding(X_test)
-    
-    # Evaluate by padding level
-    print("\n" + "="*60)
-    print("PERFORMANCE BY PADDING LEVEL")
-    print("="*60)
-    print("Data Rows | Count    | Percentage | MAE    | RMSE   | Description")
-    print("-"*60)
-    
-    padding_results = evaluate_by_padding_level(y_test, y_pred, padding_info)
-    
-    for data_rows in sorted(padding_results.keys()):
-        result = padding_results[data_rows]
-        padding_rows = 5 - data_rows
-        description = f"{padding_rows} pad rows" if padding_rows > 0 else "No padding"
+    for position in [1, 2, 3]:
         
-        print(f"{data_rows:8d}  | {result['count']:7,} | {result['percentage']:8.1f}% | "
-              f"{result['mae']:6.4f} | {result['rmse']:6.4f} | {description}")
-    
-    # Evaluate by target ranges
-    print("\n" + "="*60)
-    print("PERFORMANCE BY TARGET VALUE RANGE")
-    print("="*60)
-    print("Range  | Count    | Percentage | MAE    | RMSE   | Mean Actual | Mean Predicted")
-    print("-"*75)
-    
-    target_results = evaluate_by_target_range(y_test, y_pred)
-    
-    for range_label in sorted(target_results.keys(), key=lambda x: float(x.split('-')[0]) if '-' in x else float(x.replace('+', ''))):
-        result = target_results[range_label]
-        print(f"{range_label:6s} | {result['count']:7,} | {result['percentage']:8.1f}% | "
-              f"{result['mae']:6.4f} | {result['rmse']:6.4f} | {result['mean_actual']:9.2f} | "
-              f"{result['mean_predicted']:12.2f}")
-    
-    # NEW: Analyze prediction distribution
-    print("\n" + "="*60)
-    print("MODEL PREDICTION DISTRIBUTION")
-    print("="*60)
-    print("How often does the model predict values in each range?")
-    print("-"*60)
-    
-    pred_distribution = analyze_prediction_distribution(y_pred)
-    
-    print("Range  | Predicted Count | Predicted %")
-    print("-"*40)
-    
-    for range_label in sorted(pred_distribution.keys(), key=lambda x: float(x.split('-')[0]) if '-' in x else float(x.replace('+', ''))):
-        result = pred_distribution[range_label]
-        print(f"{range_label:6s} | {result['count']:14,} | {result['percentage']:9.1f}%")
-    
-    # Compare actual vs predicted distribution
-    print("\n" + "="*60)
-    print("ACTUAL vs PREDICTED DISTRIBUTION COMPARISON")
-    print("="*60)
-    
-    # Get actual distribution
-    y_flat = y_test.squeeze() if y_test.dim() > 1 else y_test
-    actual_distribution = analyze_prediction_distribution(y_flat)
-    
-    print("Range  | Actual Count | Actual % | Predicted Count | Predicted % | Difference")
-    print("-"*75)
-    
-    for range_label in sorted(actual_distribution.keys(), key=lambda x: float(x.split('-')[0]) if '-' in x else float(x.replace('+', ''))):
-        actual = actual_distribution[range_label]
-        predicted = pred_distribution[range_label]
-        diff = predicted['percentage'] - actual['percentage']
-        
-        print(f"{range_label:6s} | {actual['count']:11,} | {actual['percentage']:7.1f}% | "
-              f"{predicted['count']:14,} | {predicted['percentage']:9.1f}% | {diff:+8.1f}%")
-    
-    # Additional analysis: correlation between padding and performance
-    print("\n" + "="*60)
-    print("PADDING ANALYSIS SUMMARY")
-    print("="*60)
-    
-    padding_distribution = {}
-    for info in padding_info:
-        rows = info['actual_data_rows']
-        if rows not in padding_distribution:
-            padding_distribution[rows] = 0
-        padding_distribution[rows] += 1
-    
-    total_sequences = len(padding_info)
-    sequences_with_padding = sum(count for rows, count in padding_distribution.items() if rows < 5)
-    
-    print(f"Total sequences: {total_sequences:,}")
-    print(f"Sequences with full data (5 gameweeks): {padding_distribution.get(5, 0):,}")
-    print(f"Sequences with padding (1-4 gameweeks): {sequences_with_padding:,}")
-    print(f"Percentage with padding: {(sequences_with_padding / total_sequences) * 100:.1f}%")
-    
-    # Performance difference between padded and non-padded
-    if 5 in padding_results and len([r for r in padding_results.keys() if r < 5]) > 0:
-        full_data_rmse = padding_results[5]['rmse']
-        padded_rmse_values = [padding_results[r]['rmse'] for r in padding_results.keys() if r < 5]
-        avg_padded_rmse = np.mean(padded_rmse_values)
-        
-        print(f"\nPerformance comparison:")
-        print(f"RMSE with full data (5 gameweeks): {full_data_rmse:.4f}")
-        print(f"Average RMSE with padding (1-4 gameweeks): {avg_padded_rmse:.4f}")
-        print(f"Performance difference: {avg_padded_rmse - full_data_rmse:+.4f}")
-    
-    # Target value distribution analysis
-    print("\n" + "="*60)
-    print("TARGET VALUE DISTRIBUTION")
-    print("="*60)
-    
-    y_flat = y_test.squeeze() if y_test.dim() > 1 else y_test
-    print(f"Target statistics:")
-    print(f"  Mean: {y_flat.mean().item():.2f}")
-    print(f"  Std:  {y_flat.std().item():.2f}")
-    print(f"  Min:  {y_flat.min().item():.2f}")
-    print(f"  Max:  {y_flat.max().item():.2f}")
-    
-    # Show percentiles
-    percentiles = [25, 50, 75, 90, 95, 99]
-    print(f"Percentiles:")
-    for p in percentiles:
-        val = torch.quantile(y_flat, p/100).item()
-        print(f"  {p:2d}th: {val:.2f}")
-    
-    # Prediction statistics
-    y_pred_flat = y_pred.squeeze() if y_pred.dim() > 1 else y_pred
-    print(f"\nPrediction statistics:")
-    print(f"  Mean: {y_pred_flat.mean().item():.2f}")
-    print(f"  Std:  {y_pred_flat.std().item():.2f}")
-    print(f"  Min:  {y_pred_flat.min().item():.2f}")
-    print(f"  Max:  {y_pred_flat.max().item():.2f}")
+        # don't bother about keepers, variance in scores is not that great
+        # so, save the free transfer for other positions
 
-if __name__ == "__main__":
-    main()
+        player_df = predicted_df[predicted_df.position_encoded==position].sort_values('predicted', ascending=False).reset_index()
+        lowest_pos = 0
+        player_names = team_df[team_df.position_encoded==position]['name'].values
+        
+        # loop through the players for this position, and get the rank (row number) of the player with the lowest predicted score
+        for p in player_names:
+            player_pos = player_df[player_df['name']==p].index[0]
+            if player_pos > lowest_pos:
+                lowest_pos = player_pos
+                potential_out = p
+                potential_out_cost = team_df[team_df['name']==p].value.values[0]
+                potential_out_team = team_df[team_df['name']==p].team_x.values[0]
+
+            elif len(player_names) <= 1:
+                potential_out_cost = 0
+                potential_out_team = 'none'
+                potential_out = 'none'
+                
+        # get all players above this player
+        potential_players = player_df[:lowest_pos]
+        
+        # only keep players that we can afford
+        potential_players = potential_players[potential_players.value <= potential_out_cost + current_money]
+        
+        # only keep players who played (need a better way of doing this)
+        potential_players = potential_players[potential_players.minutes > 0]
+
+        # get the prediction difference for each suggested player
+        # select the one with the highest difference as the suggested transfer (compare across positons)
+        
+        potential_out_predicted = team_df[team_df['name']==p].predicted.values[0]
+
+        for i, row in potential_players.iterrows():
+            # skip if it is a player we already have
+            if row['name'] in team_list:
+                continue
+
+
+
+            # if there are no other players of the same team, it's ok to consider this player
+            # if not, check whether there are 3 players of the same team already
+            if row.team_x not in teams_dict:
+                pass
+            else:
+                if len(teams_dict[row.team_x]) == 3:
+                    # if there are already 3 players of the same team,
+                    # can't take another player of the same team
+                    # unless the suggested_out is the same team as suggested_in (direct swap)
+                   
+                    if row.team_x == potential_out_team:
+                        pass
+                    else:
+                        continue
+                else:
+                    pass
+                
+            
+            # check for difference in predictions
+            if row.predicted - potential_out_predicted > predicted_diff:
+                predicted_diff = row.predicted - potential_out_predicted
+                suggested_in = row['name']
+                suggested_out = potential_out
+                
+                # calculate change in money
+                money_change = potential_out_cost - row.value
+                
+    return suggested_in, suggested_out, money_change
+
+
+def get_score(team_list, gw_df, sort_by='predicted'):
+    
+    gw_score = gw_df[gw_df['name'].isin(team_list)].actual.sum() \
+        + gw_df[(gw_df['name'].isin(team_list)) & (gw_df['position_encoded']!= 0)].sort_values(sort_by, ascending=False).head(1).actual.values[0]
+
+    print(gw_df[gw_df['name'].isin(team_list)][['name', 'actual', 'predicted']])
+    print("total_score for gameweek", gw_df['GW'].values[0], ":", gw_score)
+    return gw_score
+
+
+
+def get_performance(team_list, starting_money, gw_list,
+                   prediction_df):
+    
+    current_money = starting_money
+    total_score = 0
+    
+    
+    in_list = []
+    out_list = []
+    score_list = []
+    unplayed_list = []
+    
+    
+    for gw in gw_list:
+        print("Gameweek:", gw)
+        print("my team:", team_list)
+        gw_df = prediction_df[prediction_df.GW==gw]
+        money_change = 0
+        suggested_in = ''
+        suggested_out = ''
+        if gw > 1:
+            
+
+            suggested_in, suggested_out, money_change = get_suggested_transfer(gw_df, team_list, current_money)
+        
+            current_money += money_change
+
+            team_list.append(suggested_in)
+            team_list.remove(suggested_out)
+            
+        
+
+        ## Calculate scores
+        
+        gw_score = get_score(team_list, gw_df)
+
+        print("suggested in:", suggested_in)
+        print("suggested out:", suggested_out)
+        out_list.append(suggested_out)
+        in_list.append(suggested_in)
+        score_list.append(gw_score)
+        
+        total_score += gw_score
+        
+    out_df = pd.DataFrame({'GW': gw_list,
+                          'player_in': in_list,
+                          'player_out': out_list,
+                          'total_score': score_list})
+
+    
+    return out_df, total_score
+
+
+
+def get_season_performance(y_test, predictions, test, remaining_lagged_features, previous_season_df, current_season_df,
+                           predicted_df=None):
+    """
+    Get the season performance of the team based on the predictions.
+    """ 
+
+    available_players_df = make_available_players_df(current_season_df, previous_season_df)
+
+    bench_player_names, bench_cost = get_cheapest_players(available_players_df)
+    print("Bench players:", bench_player_names)
+    print("Bench cost:", bench_cost)
+
+    if predicted_df is None:
+        predicted_df = make_predicted_table(y_test, predictions, test[remaining_lagged_features + ['name', 'GW', 'team_x', 'total_points', 'value', 'minutes']] )
+    print("length available players df", len(available_players_df))
+    prob = solve_optimization_problem(available_players_df, bench_cost)
+    initial_team_df = get_initial_team(prob, available_players_df)
+    my_team = initial_team_df['name'].tolist()
+
+    print("My team:", my_team)
+    gameweeks = (test.GW).unique()
+    print("Gameweeks:", len(gameweeks))
+    starting_money = 1000 - bench_cost - initial_team_df.value.sum()
+    print("Starting money:", starting_money)
+
+    xgb_cv_perf, total_score = get_performance(my_team, starting_money, gameweeks,
+                    predicted_df)
+    
+    return xgb_cv_perf, total_score
+
+def season_performance_with_unlimited_transfers(y_test, predictions, remaining_lagged_features):
+    """
+    Get the season performance of the team based on the predictions with unlimited transfers.
+    Creates a completely new optimal team for each gameweek using that gameweek's predictions.
+    """
+    previous_season = pd.read_csv(data_path + '/val_data.csv')
+    test = pd.read_csv(data_path + '/test_data.csv')
+
+    group_key = 'name'
+    first_cols = ['team_x','season_x', 'position_encoded', 'element', 'value', 'position', 'was_home']
+
+    # Only use non-grouping columns in aggregation
+    agg_dict = {
+        col: 'first' if col in first_cols else 'sum'
+        for col in test.columns
+        if col != group_key
+    }
+
+    summed_test = test.groupby('name', as_index=False).agg(agg_dict)
+    summed_last_season = previous_season.groupby('name', as_index=False).agg(agg_dict)
+    summed_last_season['value'] = summed_last_season['value'].astype(int)
+    summed_test['value'] = summed_test['value'].astype(int)
+
+    # Create the predicted table for all gameweeks
+    predicted_df = make_predicted_table(y_test, predictions, test[remaining_lagged_features + ['name', 'GW', 'team_x', 'total_points', 'value', 'minutes', 'season_x', 'element']])
+    
+    # Get available players (merge current season with previous season data)
+    available_players_df = make_available_players_df(summed_test, summed_last_season)
+    
+    # Get bench players and cost (needed for budget calculation)
+    bench_player_names, bench_cost = get_cheapest_players(available_players_df)
+    print("Bench players:", bench_player_names)
+    print("Bench cost:", bench_cost)
+    
+    # Available budget for main team (1000 - bench cost)
+    available_budget = 1000 - bench_cost
+    
+    gameweeks = sorted(test['GW'].unique())
+    total_score = 0
+    gw_scores = []
+    gw_teams = []
+    
+    print(f"Simulating season with unlimited transfers for {len(gameweeks)} gameweeks")
+    print(f"Available budget per gameweek: {available_budget}")
+    
+    for gw in gameweeks:
+        print(f"\n--- Gameweek {gw} ---")
+        
+        # Get predictions for this specific gameweek
+        gw_predictions = predicted_df[predicted_df['GW'] == gw].copy()
+
+        # Create a temporary available players dataframe with this gameweek's predictions
+        # Merge current gameweek predictions with player info
+        gw_player_data = pd.merge(
+            available_players_df[['name', 'team_x', 'position_encoded', 'value', 'total_points_last_season']],
+            gw_predictions[['name', 'predicted']],
+            on='name',
+            how='inner'
+        )
+        
+        # Only consider players who are predicted to play (have predictions)
+        gw_player_data = gw_player_data.dropna(subset=['predicted'])
+        
+        print(f"Players available for GW {gw}: {len(gw_player_data)}")
+        
+        if len(gw_player_data) == 0:
+            prob = solve_optimization_problem(available_players_df, bench_cost)
+            initial_team_df = get_initial_team(prob, available_players_df)
+            my_team = initial_team_df['name'].tolist()
+            print("My team:", my_team)
+            gw_score = get_score(my_team, gw_predictions, sort_by='actual')
+            total_score += gw_score
+            gw_teams.append(my_team)
+            gw_scores.append(gw_score)
+            continue
+        
+        # Solve optimization problem for this gameweek using predicted points
+        try:
+            prob = solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw)
+            
+            if prob.status == 1:  # Optimal solution found
+                # Get the optimal team for this gameweek
+                optimal_team_df = get_initial_team(prob, gw_player_data)
+                optimal_team_names = optimal_team_df['name'].tolist()
+                
+                # Calculate score for this gameweek using actual points
+                gw_actual_data = gw_predictions[gw_predictions['name'].isin(optimal_team_names)]
+                gw_score = gw_actual_data['actual'].sum()
+                print(gw_actual_data[['name', 'actual', 'predicted']])
+                # Add captain bonus (best performing outfield player gets double points)
+                outfield_players = gw_actual_data[gw_actual_data['position_encoded'] != 0]
+                if len(outfield_players) > 0:
+                    captain_bonus = outfield_players['actual'].max()
+                    gw_score += captain_bonus
+                
+                total_score += gw_score
+                gw_scores.append(gw_score)
+                gw_teams.append(optimal_team_names)
+                
+                print(f"GW {gw} optimal team: {optimal_team_names}")
+                print(f"GW {gw} score: {gw_score}")
+                print(f"Team cost: {optimal_team_df['value'].sum()}")
+                
+            else:
+                print(f"Could not find optimal solution for GW {gw}")
+                gw_scores.append(0)
+                gw_teams.append([])
+                
+        except Exception as e:
+            print(f"Error solving optimization for GW {gw}: {e}")
+            gw_scores.append(0)
+            gw_teams.append([])
+    
+    # Create results dataframe
+    results_df = pd.DataFrame({
+        'team': gw_teams,
+        'gw_score': gw_scores
+    })
+    
+    print(f"\n=== UNLIMITED TRANSFERS SEASON SUMMARY ===")
+    print(f"Total season score: {total_score}")
+    print(f"Average GW score: {np.mean(gw_scores):.2f}")
+    print(f"Best GW score: {max(gw_scores) if gw_scores else 0}")
+    print(f"Worst GW score: {min(gw_scores) if gw_scores else 0}")
+    
+    return results_df, total_score
+
+
+def solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw_num):
+    """
+    Solve optimization problem for a specific gameweek using predicted points as the objective.
+    """
+    available_cash = 1000 - bench_cost
+    
+    prob = pulp.LpProblem(f'OptimalTeam_GW{gw_num}', pulp.LpMaximize)
+    
+    # Create decision variables
+    decision_variables = [pulp.LpVariable(name, cat="Binary") for name in gw_player_data['name']]
+    
+    # Objective function: maximize predicted points for this gameweek
+    objective = ""
+    for i, player in enumerate(decision_variables):
+        objective += gw_player_data.iloc[i]['predicted'] * player
+    prob += objective
+    
+    # Budget constraint
+    budget_constraint = ""
+    for i, player in enumerate(decision_variables):
+        budget_constraint += gw_player_data.iloc[i]['value'] * player
+    prob += (budget_constraint <= available_cash)
+    
+    # Position constraints (1 GK, 4 DEF, 4 MID, 2 FWD)
+    for position in [0, 1, 2, 3]:
+        position_constraint = ""
+        required_count = [1, 4, 4, 2][position]  # GK, DEF, MID, FWD
+        
+        for i, player in enumerate(decision_variables):
+            if gw_player_data.iloc[i]['position_encoded'] == position:
+                position_constraint += 1 * player
+        
+        prob += (position_constraint == required_count)
+    
+    # Team constraint (max 3 players per team)
+    for team in gw_player_data['team_x'].unique():
+        team_constraint = ""
+        team_players = gw_player_data[gw_player_data['team_x'] == team]
+        
+        for i, player in enumerate(decision_variables):
+            if gw_player_data.iloc[i]['name'] in team_players['name'].values:
+                team_constraint += 1 * player
+        
+        prob += (team_constraint <= 3)
+    
+    # Solve the problem
+    prob.solve()  # Silent solver
+    
+    return prob
