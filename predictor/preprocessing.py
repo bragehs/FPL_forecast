@@ -432,20 +432,13 @@ def remove_correlated_features_advanced(df, threshold=0.95, method='pearson',
     return df_cleaned, result_info
 
 
-def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, padding_strategy='aggressive', meta_data=[]):
+def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequences=1, meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
-    
-    Parameters:
-    -----------
-    padding_strategy : str
-        'conservative' - Only pad early gameweeks (original behavior)
-        'aggressive' - Add more padding throughout training to help model learn with limited data
-    
-    For aggressive padding strategy:
-    - Creates multiple padded versions for early gameweeks
-    - Adds random padding to later gameweeks to simulate missing data scenarios
-    - Helps model learn to handle incomplete historical information
+    aggressive padding strategy:
+        - Creates multiple padded versions for early gameweeks
+        - Adds random padding to later gameweeks to simulate missing data scenarios
+        - Helps model learn to handle incomplete historical information
     
     Returns:
         X_tensor: Input sequences
@@ -460,146 +453,93 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, min_sequenc
 
     for player_id, stats in df.groupby(['element', 'season_x']):
         group = stats.sort_values('GW').reset_index(drop=True)
-    
-        # Standard sequences (same as before)
-        for i in range(len(group) - future_sequences + 1):
+        # Add sequences with artificial padding for mid-season scenarios
+        # This simulates situations where we have limited historical data due to transfers, injuries, etc.
+        
+        for i in range(past_sequences, min(len(group) - future_sequences + 1, 20)):  # Limit to first 20 GWs
             target_start_idx = i
             
-            # Skip if we don't have enough future data
             if target_start_idx + future_sequences - 1 >= len(group):
                 continue
             
-            # Determine how much historical data we have available
-            available_history = i + 1  # +1 because we include the current gameweek
-            
-            if available_history >= past_sequences:
-                # We have enough history, take the last 'past_sequences' gameweeks
-                sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
-            else:
-                # We need padding for early gameweeks
-                actual_data = group.iloc[0:i + 1][feature_cols].values
-                padding_needed = past_sequences - available_history
+            # Create sequences with different amounts of artificial padding
+            for padding_amount in [1, 2, 3]:  # Add 1, 2, or 3 steps of padding
+                if i + 1 - padding_amount <= 0:
+                    continue
                 
-                # Create padded sequence: zeros + actual data
+                # Take less historical data and pad the beginning
+                actual_history_length = past_sequences - padding_amount
+                actual_data = group.iloc[i + 1 - actual_history_length:i + 1][feature_cols].values
+                
+                # Create padded sequence
+                padded_sequence = np.zeros((past_sequences, num_features))
+                padded_sequence[padding_amount:] = actual_data
+                
+                # Get target values
+                target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+                
+                if len(target) != future_sequences:
+                    continue
+                
+                X_seq.append(padded_sequence)
+                y_seq.append(target)
+                
+                # Store mapping information
+                prediction_gw = group.iloc[target_start_idx]['GW']
+                mapping_info.append({
+                    'sequence_idx': len(X_seq) - 1,
+                    'element': player_id[0],
+                    'season_x': player_id[1],
+                    'name': group.iloc[target_start_idx]['name'],
+                    'prediction_gw': prediction_gw,
+                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                    'padding_used': padding_amount,
+                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                    'sequence_type': f'artificial_padding_{padding_amount}'
+                })
+        
+        # Add sequences simulating "new player" scenarios (heavy padding)
+        # Take a few mid-season predictions and treat them as if the player just started
+        for i in [10, 15, 20, 25]:  # Sample some mid-season gameweeks
+            if i >= len(group) - future_sequences + 1:
+                continue
+            
+            target_start_idx = i
+            if target_start_idx + future_sequences - 1 >= len(group):
+                continue
+            
+            # Create heavily padded sequences (simulating new players)
+            for simulated_history in [1, 2]:  # Simulate having only 1-2 games of history
+                actual_data = group.iloc[i + 1 - simulated_history:i + 1][feature_cols].values
+                padding_needed = past_sequences - simulated_history
+                
                 padded_sequence = np.zeros((past_sequences, num_features))
                 padded_sequence[padding_needed:] = actual_data
-                sequence_data = padded_sequence
-            
-            # Get target values
-            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-            
-            if len(target) != future_sequences:
-                continue
                 
-            X_seq.append(sequence_data)
-            y_seq.append(target)
-            
-            # Store mapping information for the prediction gameweek
-            prediction_gw = group.iloc[target_start_idx]['GW']
-            mapping_info.append({
-                'sequence_idx': len(X_seq) - 1,
-                'element': player_id[0],
-                'season_x': player_id[1],
-                'name': group.iloc[target_start_idx]['name'],
-                'prediction_gw': prediction_gw,
-                'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
-                'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                'sequence_type': 'standard'
-            })
-        
-        # Aggressive padding strategy - add extra padded sequences
-        if padding_strategy == 'aggressive' and len(group) >= past_sequences:
-            
-            # Add sequences with artificial padding for mid-season scenarios
-            # This simulates situations where we have limited historical data due to transfers, injuries, etc.
-            
-            for i in range(past_sequences, min(len(group) - future_sequences + 1, 20)):  # Limit to first 20 GWs
-                target_start_idx = i
+                target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
                 
-                if target_start_idx + future_sequences - 1 >= len(group):
+                if len(target) != future_sequences:
                     continue
                 
-                # Create sequences with different amounts of artificial padding
-                for padding_amount in [1, 2, 3]:  # Add 1, 2, or 3 steps of padding
-                    if i + 1 - padding_amount <= 0:
-                        continue
-                    
-                    # Take less historical data and pad the beginning
-                    actual_history_length = past_sequences - padding_amount
-                    actual_data = group.iloc[i + 1 - actual_history_length:i + 1][feature_cols].values
-                    
-                    # Create padded sequence
-                    padded_sequence = np.zeros((past_sequences, num_features))
-                    padded_sequence[padding_amount:] = actual_data
-                    
-                    # Get target values
-                    target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-                    
-                    if len(target) != future_sequences:
-                        continue
-                    
-                    X_seq.append(padded_sequence)
-                    y_seq.append(target)
-                    
-                    # Store mapping information
-                    prediction_gw = group.iloc[target_start_idx]['GW']
-                    mapping_info.append({
-                        'sequence_idx': len(X_seq) - 1,
-                        'element': player_id[0],
-                        'season_x': player_id[1],
-                        'name': group.iloc[target_start_idx]['name'],
-                        'prediction_gw': prediction_gw,
-                        'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                        'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                        'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                        'padding_used': padding_amount,
-                        'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                        'sequence_type': f'artificial_padding_{padding_amount}'
-                    })
-            
-            # Add sequences simulating "new player" scenarios (heavy padding)
-            # Take a few mid-season predictions and treat them as if the player just started
-            for i in [10, 15, 20, 25]:  # Sample some mid-season gameweeks
-                if i >= len(group) - future_sequences + 1:
-                    continue
+                X_seq.append(padded_sequence)
+                y_seq.append(target)
                 
-                target_start_idx = i
-                if target_start_idx + future_sequences - 1 >= len(group):
-                    continue
-                
-                # Create heavily padded sequences (simulating new players)
-                for simulated_history in [1, 2]:  # Simulate having only 1-2 games of history
-                    actual_data = group.iloc[i + 1 - simulated_history:i + 1][feature_cols].values
-                    padding_needed = past_sequences - simulated_history
-                    
-                    padded_sequence = np.zeros((past_sequences, num_features))
-                    padded_sequence[padding_needed:] = actual_data
-                    
-                    target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-                    
-                    if len(target) != future_sequences:
-                        continue
-                    
-                    X_seq.append(padded_sequence)
-                    y_seq.append(target)
-                    
-                    prediction_gw = group.iloc[target_start_idx]['GW']
-                    mapping_info.append({
-                        'sequence_idx': len(X_seq) - 1,
-                        'element': player_id[0],
-                        'season_x': player_id[1],
-                        'name': group.iloc[target_start_idx]['name'],
-                        'prediction_gw': prediction_gw,
-                        'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                        'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                        'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                        'padding_used': padding_needed,
-                        'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                        'sequence_type': f'new_player_sim_{simulated_history}'
-                    })
+                prediction_gw = group.iloc[target_start_idx]['GW']
+                mapping_info.append({
+                    'sequence_idx': len(X_seq) - 1,
+                    'element': player_id[0],
+                    'season_x': player_id[1],
+                    'name': group.iloc[target_start_idx]['name'],
+                    'prediction_gw': prediction_gw,
+                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                    'padding_used': padding_needed,
+                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                    'sequence_type': f'new_player_sim_{simulated_history}'
+                })
     
     X_tensor = torch.tensor(np.array(X_seq), dtype=torch.float32)
     y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
