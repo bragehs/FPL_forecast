@@ -1,3 +1,8 @@
+## FOLDERS OVERVIEW
+### predictor
+python code to train an LSTM and using pulp to get the best team for each gameweek. 
+### src
+ignore this currently. contains code from a previous project which will not be used now. i am just using the same repo to avoid setting everything up again, since the previous project was not anything good. 
 
 ## DONE
 
