@@ -449,6 +449,40 @@ def create_sequences_train(df, past_sequences=5, future_sequences=3, meta_data=[
     mapping_info = []
     
     num_features = len(feature_cols)
+    for player_id, stats in df.groupby(['element', 'season_x']):
+        group = stats.sort_values('GW').reset_index(drop=True)
+        
+        # MISSING: Normal sequence creation for players with sufficient history
+        for i in range(past_sequences, len(group) - future_sequences + 1):
+            target_start_idx = i
+            
+            if target_start_idx + future_sequences - 1 >= len(group):
+                continue
+            
+            # Take normal historical data (no padding)
+            sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
+            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+            
+            if len(target) != future_sequences:
+                continue
+            
+            X_seq.append(sequence_data)
+            y_seq.append(target)
+
+            prediction_gw = group.iloc[target_start_idx]['GW']
+            mapping_info.append({
+                    'sequence_idx': len(X_seq) - 1,
+                    'element': player_id[0],
+                    'season_x': player_id[1],
+                    'name': group.iloc[target_start_idx]['name'],
+                    'prediction_gw': prediction_gw,
+                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
+                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
+                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                    'padding_used': 0,
+                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
+                    'sequence_type': f'artificial_padding_{0}'
+                })
 
     for player_id, stats in df.groupby(['element', 'season_x']):
         group = stats.sort_values('GW').reset_index(drop=True)
