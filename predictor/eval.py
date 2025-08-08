@@ -140,7 +140,7 @@ def get_initial_team(prob, player_df):
     return initial_team
 
 
-def make_predicted_table(y_test, y_pred, gw_df):
+def make_predicted_table(y_test, y_pred):
     '''
     Create a DataFrame for LSTM model predictions.
     This needs to keep track of the Gameweek (GW) and player names.
@@ -148,29 +148,11 @@ def make_predicted_table(y_test, y_pred, gw_df):
     test_mapping = pd.read_csv(data_path + '/test_mapping.csv')
     predictions_df = test_mapping.copy()
     predictions_df['actual'] = y_test
-    predictions_df['predicted'] = y_pred 
-    #predictions_df = predictions_df[predictions_df['minutes'] > 0]  # filter out players who did not play
+    predictions_df['predicted'] = y_pred
     predictions_df.rename(columns={'prediction_gw': 'GW'}, inplace=True)
-    gameweek_1 = gw_df[gw_df['GW'] == 1][['name', 'total_points', 'value', 'GW', 'element', 'season_x', 'team_x', 'minutes', 'position_encoded']].copy()
-    gameweek_1 = gameweek_1[gameweek_1['minutes'] > 0]  # filter out players who did not play
 
-    # Add the missing columns to match predictions_df structure
-    gameweek_1['actual'] = gameweek_1['total_points']
-    gameweek_1['predicted'] = np.nan
-    gameweek_1['sequence_idx'] = np.nan  # No sequence for GW1
-    gameweek_1['padding_used'] = np.nan  # No padding info for GW1
-
-    # Reorder columns to match predictions_df
-    gameweek_1 = gameweek_1[['sequence_idx', 'element', 'season_x', 'name', 'GW', 'team_x', 'value', 'minutes', 'padding_used', 'actual', 'predicted']]
-
-    # Combine with existing predictions_df
-    predictions_df_complete = pd.concat([gameweek_1, predictions_df], ignore_index=True)
-
-    # Sort by player and gameweek for better organization
-    predictions_df_complete = predictions_df_complete.sort_values(['name', 'GW']).reset_index(drop=True)
 
     # Update the predictions_df reference
-    predictions_df = predictions_df_complete
     predictions_df = predictions_df.drop_duplicates(subset=['name', 'GW'], keep='last')
     
     return predictions_df
@@ -332,20 +314,35 @@ def get_performance(team_list, starting_money, gw_list,
 
 
 
-def get_season_performance(y_test, predictions, test, remaining_lagged_features, previous_season_df, current_season_df,
-                           predicted_df=None):
+def get_season_performance(y_test, predictions, remaining_lagged_features):
     """
     Get the season performance of the team based on the predictions.
     """ 
+    previous_season = pd.read_csv(data_path + '/val_data.csv')
+    test = pd.read_csv(data_path + '/test_data.csv')
 
-    available_players_df = make_available_players_df(current_season_df, previous_season_df)
+    group_key = 'name'
+    first_cols = ['team_x','season_x', 'position_encoded', 'element', 'value', 'position', 'was_home']
+
+    # Only use non-grouping columns in aggregation
+    agg_dict = {
+        col: 'first' if col in first_cols else 'sum'
+        for col in test.columns
+        if col != group_key
+    }
+
+    summed_test = test.groupby('name', as_index=False).agg(agg_dict)
+    summed_last_season = previous_season.groupby('name', as_index=False).agg(agg_dict)
+    summed_last_season['value'] = summed_last_season['value'].astype(int)
+    summed_test['value'] = summed_test['value'].astype(int)
+
+    available_players_df = make_available_players_df(summed_test, summed_last_season)
 
     bench_player_names, bench_cost = get_cheapest_players(available_players_df)
     print("Bench players:", bench_player_names)
     print("Bench cost:", bench_cost)
 
-    if predicted_df is None:
-        predicted_df = make_predicted_table(y_test, predictions, test[remaining_lagged_features + ['name', 'GW', 'team_x', 'total_points', 'value', 'minutes']] )
+    predicted_df = make_predicted_table(y_test, predictions)
     print("length available players df", len(available_players_df))
     prob = solve_optimization_problem(available_players_df, bench_cost)
     initial_team_df = get_initial_team(prob, available_players_df)
@@ -386,7 +383,7 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
     summed_test['value'] = summed_test['value'].astype(int)
 
     # Create the predicted table for all gameweeks
-    predicted_df = make_predicted_table(y_test, predictions, test[remaining_lagged_features + ['name', 'GW', 'team_x', 'total_points', 'value', 'minutes', 'season_x', 'element']])
+    predicted_df = make_predicted_table(y_test, predictions)
     
     # Get available players (merge current season with previous season data)
     available_players_df = make_available_players_df(summed_test, summed_last_season)

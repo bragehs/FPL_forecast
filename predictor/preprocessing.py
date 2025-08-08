@@ -17,7 +17,6 @@ position_mapping = {
 player_features_to_lag = [
     'assists',
      'bonus',
-     'bps',
      'creativity',
      'clean_sheets',
      'goals_conceded',
@@ -29,7 +28,6 @@ player_features_to_lag = [
      'red_cards',
      'yellow_cards',
      'result_encoded',
-     'total_points',
     ]
 
 
@@ -335,7 +333,8 @@ def player_lag_features(gw_df, features, lags):
             else:
                 out_df[lagged_feature] = out_df.groupby(['season_x', 'element'])[feature]\
                     .apply(lambda x: x.rolling(min_periods=1, window=lag+1).sum() - x).reset_index(level=[0, 1], drop=True)
-
+            
+            out_df[lagged_feature] = out_df[lagged_feature].round(10)
             lagged_features.append(lagged_feature)
     
     return out_df, lagged_features
@@ -584,9 +583,8 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
                 continue
             
             # Determine how much historical data we have available
-            available_history = i+1
-            #NB!! IS THIS THE ISSUE?
-            
+            available_history = i + 1
+
             if available_history >= past_sequences:
                 # We have enough history, take the last 'past_sequences' gameweeks
                 sequence_data = group.iloc[i+1 - past_sequences:i+1][feature_cols].values
@@ -620,6 +618,8 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
                 'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
                 'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
                 'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                'last_1_goals_scored': group.iloc[target_start_idx]['last_1_goals_scored'] if 'last_1_goals_scored' in group.columns else None,
+                'last_1_assists': group.iloc[target_start_idx]['last_1_assists'] if 'last_1_assists' in group.columns else None,
                 'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
                 'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None
             })
