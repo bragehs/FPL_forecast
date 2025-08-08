@@ -5,7 +5,17 @@ code is generally very messy right now. plan to make it better
 python code to train an LSTM and using pulp to get the best team for each gameweek. 
 
 #### preprocessing.py
-contains data preprocessing. still looking for some "cheating" here but cant find it. in player_lag_features, I am lagging the features up to, and not including, GW n. Then in create_sequences the target value becomes total points in GW n. 
+contains data preprocessing. in player_lag_features, I am lagging the features up to, and not including, GW n. Then in create_sequences the target value becomes total points in GW n. 
+
+#### run_simulation.ipynb
+loads preprocessed data and trained model and runs the FPL performance simulations.
+
+#### model.py
+model architectures. only using AdvancedLSTM currently.
+
+#### eval.py
+using LP to get the best team for a GW or suggested transfer.  
+
 ### src
 ignore this currently. contains code from a previous project which will not be used now. i am just using the same repo to avoid setting everything up again, since the previous project was not anything good. 
 
