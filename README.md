@@ -15,3 +15,5 @@ use the FPL public API to fetch data for the 25/26 season and use the model to g
 
 how should the model´s output get to the web?
 	- current thinking: deploy the model on the web and then call it on load or interaction. this way i do not have to implement my own backend properly. 
+
+position should be onehot encoded not label encoded

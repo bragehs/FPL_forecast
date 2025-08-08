@@ -569,6 +569,7 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
     mapping_info = []
     
     num_features = len(feature_cols)
+    print("order of feature_cols:", feature_cols)
 
     for player_id, stats in df.groupby(['element', 'season_x']):
         group = stats.sort_values('GW').reset_index(drop=True)
@@ -583,14 +584,15 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
                 continue
             
             # Determine how much historical data we have available
-            available_history = i + 1  # +1 because we include the current gameweek
+            available_history = i+1
+            #NB!! IS THIS THE ISSUE?
             
             if available_history >= past_sequences:
                 # We have enough history, take the last 'past_sequences' gameweeks
-                sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
+                sequence_data = group.iloc[i+1 - past_sequences:i+1][feature_cols].values
             else:
                 # We need padding for early gameweeks
-                actual_data = group.iloc[0:i + 1][feature_cols].values
+                actual_data = group.iloc[0:i+1][feature_cols].values
                 padding_needed = past_sequences - available_history
                 
                 # Create padded sequence: zeros + actual data
@@ -718,7 +720,6 @@ def main():
         train[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
-        min_sequences=1,
         meta_data= extra_needed,
     )
 
@@ -726,7 +727,6 @@ def main():
         val[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
-        min_sequences=1,
         meta_data= extra_needed,
     )
 
@@ -734,7 +734,6 @@ def main():
         test[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
-        min_sequences=1,
         meta_data= extra_needed,
     )
 
