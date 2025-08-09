@@ -712,11 +712,12 @@ def main():
     train_seasons = seasons[:number_of_training_seasons]
     val_seasons = seasons[number_of_training_seasons:number_of_training_seasons + 1]
     test_seasons = seasons[number_of_training_seasons + 1:]
+
     train = data[data["season_x"].isin(train_seasons)]
     val = data[data["season_x"].isin(val_seasons)]
     test = data[data["season_x"].isin(test_seasons)]
 
-    train, scalers, encoders = preprocess_data(data, min_max_features=continuous_features, categorical_features=[], target="total_points",
+    train, scalers, encoders = preprocess_data(train, min_max_features=continuous_features, categorical_features=[], target="total_points",
                                 binary_features=categorical_features, metadata_features=meta_data, fit=True)
                                 #this is confusing, binary features means nothing happens and these columns are already ready
     

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "PLAN.md",
+                "file": "README.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "PLAN"
+              "title": "README"
             }
           }
         ]
@@ -170,8 +170,9 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
-    "README.md",
     "PLAN.md",
+    "predictor/best_model.pth",
+    "README.md",
     "backend/predictor/best_model.pth",
     "backend/predictor/training.py",
     "backend/training.py",
@@ -180,7 +181,6 @@
     "backend/model.py",
     "model.py",
     "backend/predictor/summed_df_debug.csv",
-    "backend/best_model.pth",
-    "best_model.pth"
+    "backend/best_model.pth"
   ]
 }
