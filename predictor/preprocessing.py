@@ -27,7 +27,6 @@ player_features_to_lag = [
      'threat',
      'red_cards',
      'yellow_cards',
-     'result_encoded',
     ]
 
 
@@ -703,7 +702,7 @@ def main():
     target = ["total_points"]
 
 
-    categorical_features = ["position_encoded", "was_home"]
+    categorical_features = []
     continuous_features = [col for col in lagged_features if col not in categorical_features + target]
     meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
     
