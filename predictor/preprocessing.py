@@ -1,17 +1,17 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler, OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 import os
 import unidecode
 import torch
 import pickle
 
 position_mapping = {
-    'GK': 0,
-    'GKP': 0,
-    'DEF': 1,
-    'MID': 2,
-    'FWD': 3
+    'GK': 1,
+    'GKP': 1,
+    'DEF': 2,
+    'MID': 3,
+    'FWD': 4,
 }
 
 player_features_to_lag = [
@@ -29,27 +29,6 @@ player_features_to_lag = [
      'yellow_cards',
     ]
 
-
-
-def create_result_column(df):
-    home_result = df['team_h_score']
-    away_result = df['team_a_score']
-    player_team = df['was_home']
-    if player_team:
-        if home_result > away_result:
-            return 2
-        elif home_result == away_result:
-            return 1
-        else:
-            return 0
-    else:
-        if away_result > home_result:
-            return 2
-        elif away_result == home_result:
-            return 1
-        else:
-            return 0
-        
 
 def fix_gameweek_labels(df):
     """
@@ -673,12 +652,7 @@ def main():
     'selected': 'chosen_by',
     })
 
-    club_encoder = LabelEncoder()
-    opp_encoder = LabelEncoder()
-    data["club_encoded"] = club_encoder.fit_transform(data["team_x"])
-    data["opponent_encoded"] = opp_encoder.fit_transform(data["opp_team_name"])
     data["position_encoded"] = data["position"].map(position_mapping)
-    data['result_encoded'] = data.apply(create_result_column, axis=1)
 
     data['name'] = data.name.str.replace('_\d+','')
     data['name'] = data['name'].str.replace(" ", "_").str.replace("-", "_").str.replace('_\d+','')
@@ -699,11 +673,8 @@ def main():
     #include new lagged features
     lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded"])
 
-    target = ["total_points"]
 
-
-    categorical_features = []
-    continuous_features = [col for col in lagged_features if col not in categorical_features + target]
+    continuous_features = [col for col in lagged_features if col not in ["was_home", "position_encoded", "total_points"]]
     meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
     
     seasons = np.unique(data["season_x"])
@@ -716,20 +687,24 @@ def main():
     val = data[data["season_x"].isin(val_seasons)]
     test = data[data["season_x"].isin(test_seasons)]
 
-    train, scalers, encoders = preprocess_data(train, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=categorical_features, metadata_features=meta_data, fit=True)
+    train, scalers, encoders = preprocess_data(train, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=True)
                                 #this is confusing, binary features means nothing happens and these columns are already ready
     
-    val = preprocess_data(val, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=categorical_features, metadata_features=meta_data, fit=False,
+    val = preprocess_data(val, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
-    test = preprocess_data(test, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=categorical_features, metadata_features=meta_data, fit=False,
+    test = preprocess_data(test, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
 
+    position_columns = [col for col in train.columns if col.startswith("position_encoded")]
+    lagged_features.extend(position_columns)
+    lagged_features.remove("position_encoded")
     _, removed_features = remove_correlated_features_advanced(
     train[lagged_features], 
     threshold=0.9,
+    exclude_columns=position_columns
     )
 
     # Update lagged_features to only include remaining features

@@ -103,14 +103,11 @@ def train_model(
             if verbose >= 2:
                 model_data = {
                     'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
-                    'epoch': epoch,
-                    'best_performance': best_performance,
-                    'input_dim': model.input_dim,
-                    'hidden_dim': model.hidden_dim,
-                    'num_layers': model.num_layers,
-                    'num_fc_layers': model.num_fc_layers}
+                    'best_performance': float(best_performance),
+                    'input_dim': int(model.input_dim),
+                    'hidden_dim': int(model.hidden_dim),
+                    'num_layers': int(model.num_layers),
+                    'num_fc_layers': int(model.num_fc_layers)}
                 torch.save(model_data, f"best_model.pth")
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
