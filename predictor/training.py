@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from model import AdvancedLSTM
+from model import HybridLSTMAttn
 import os
 import numpy as np
 import random
@@ -106,8 +106,8 @@ def train_model(
                     'best_performance': float(best_performance),
                     'input_dim': int(model.input_dim),
                     'hidden_dim': int(model.hidden_dim),
-                    'num_layers': int(model.num_layers),
-                    'num_fc_layers': int(model.num_fc_layers)}
+                    'transformer_heads': int(model.transformer_heads),
+                    'transformer_layers': int(model.transformer_layers)}
                 torch.save(model_data, f"best_model.pth")
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
@@ -122,7 +122,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
         'num_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'num_fc_layers': [1, 2, 3, 4],
+        'transformer_layers': [1, 2, 3, 4],
         'batch_size': [32, 64, 128, 256]
     }
     
@@ -140,7 +140,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
             'weight_decay': random.choice(param_ranges['weight_decay']),
             'num_layers': random.choice(param_ranges['num_layers']),
             'dropout': random.choice(param_ranges['dropout']),
-            'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
+            'transformer_layers': random.choice(param_ranges['transformer_layers']),
             'batch_size': random.choice(param_ranges['batch_size']),
         }
         
@@ -148,13 +148,13 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
         print(f"Params: {params}")
         
         # Create model with sampled parameters
-        model = AdvancedLSTM(
+        model = HybridLSTMAttn(
             input_dim=X_train.shape[-1], 
             hidden_dim=params['hidden_dim'], 
             output_dim=1,
             num_layers=params['num_layers'],
             dropout=params['dropout'],
-            num_fc_layers=params['num_fc_layers']
+            transformer_layers=params['transformer_layers']
         )     
         # Train model
         val_rmse = train_model(

@@ -27,6 +27,9 @@ player_features_to_lag = [
      'threat',
      'red_cards',
      'yellow_cards',
+     'expected_goals',
+     'expected_assists',
+     'expected_goals_conceded',
     ]
 
 
@@ -127,6 +130,8 @@ def filter_data(df):
     df['season_progress'] = df['GW'] / df['GW'].max()
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
     df = df[df['minutes'] > 0]  # Exclude players with 0 minutes
+    df['is_xg_available'] = df['expected_goals'].notna().astype(int)
+    df[['expected_goals', 'expected_assists', 'expected_goals_conceded']] = df[['expected_goals', 'expected_assists', 'expected_goals_conceded']].fillna(df[['expected_goals', 'expected_assists', 'expected_goals_conceded']].mean()) 
     return df
 
 def add_fixture_difficulty_to_dataframe(df, backend_root):
@@ -672,7 +677,7 @@ def main():
 
     data = add_future_lagged_features(data)
     #include new lagged features
-    lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded"])
+    lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded", "is_xg_available"])
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "position_encoded", "total_points"]]
@@ -705,12 +710,7 @@ def main():
     position_columns = [col for col in train.columns if col.startswith("position_encoded")]
     lagged_features.extend(position_columns)
     lagged_features.remove("position_encoded")
-    """     _, removed_features = remove_correlated_features_advanced(
-        train[lagged_features], 
-        threshold=0.9,
-        exclude_columns=position_columns
-        )
-    """
+
     # Update lagged_features to only include remaining features
     #remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
     pickle.dump(lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
@@ -722,14 +722,18 @@ def main():
         train[col] = train[col].astype(float)
         val[col] = val[col].astype(float)
         test[col] = test[col].astype(float)
-    print(train.columns)
+
     #also save data pre-sequences
     output_dir = os.path.join(base_path, "processed_data")
     train.to_csv(os.path.join(output_dir, "train_data.csv"), index=False)
     val.to_csv(os.path.join(output_dir, "val_data.csv"), index=False)
     test.to_csv(os.path.join(output_dir, "test_data.csv"), index=False)
 
-    X_train, y_train, train_mapping = create_sequences_train(
+    #test for NA values
+    for df in [train, val, test]:
+        print(df.isna().sum())
+
+    X_train, y_train, train_mapping = create_sequences_test(
         train[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
