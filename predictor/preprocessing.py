@@ -634,7 +634,7 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
                 'last_1_goals_scored': group.iloc[target_start_idx]['last_1_goals_scored'] if 'last_1_goals_scored' in group.columns else None,
                 'last_1_assists': group.iloc[target_start_idx]['last_1_assists'] if 'last_1_assists' in group.columns else None,
                 'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
-                'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None
+                'position_encoded': group.iloc[target_start_idx]['position_encoded'].values[0] if 'position_encoded' in group.columns else None
             })
     
     X_tensor = torch.tensor(np.array(X_seq), dtype=torch.float32)
@@ -718,7 +718,7 @@ def main():
     extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes', 'position_encoded']
     needed_features = extra_needed + lagged_features
 
-    for col in [col for col in needed_features if col not in ['season_x', 'name', 'position_encoded']]:
+    for col in [col for col in needed_features if col not in ['season_x', 'name']]:
         train[col] = train[col].astype(float)
         val[col] = val[col].astype(float)
         test[col] = test[col].astype(float)

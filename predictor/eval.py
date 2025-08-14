@@ -51,81 +51,6 @@ def get_cheapest_players(player_df):
     return cheapest_player_names, total_cost
 
 
-def make_decision_variables(player_df):
-    return [pulp.LpVariable(i, cat="Binary") for i in player_df['name']]
-
-
-def make_optimization_function(player_df, decision_variables):
-    op_func = ""
-
-    for i, player in enumerate(decision_variables):
-        op_func += player_df.total_points_last_season[i] * player
-
-    return op_func
-
-
-def make_cash_constraint(player_df, decision_variables, available_cash):
-    total_paid = ""
-    for rownum, row in player_df.iterrows():
-        for i, player in enumerate(decision_variables):
-            if rownum == i:
-                formula = row['value']*player
-                total_paid += formula
-
-    return (total_paid <= available_cash)
-
-
-def make_player_constraint(position, n, decision_variables, player_df):
-    
-    total_n = ""
-    
-    player_positions = player_df.position_encoded
-    
-    for i, player in enumerate(decision_variables):
-        if player_positions[i] == position:
-            total_n += 1*player
-            
-    return(total_n == n)
-
-
-def add_team_constraint(prob, player_df, decision_variables):
-
-    for team, group in player_df.groupby('team_x'):
-        team_total = ''
-        
-        for player in decision_variables:
-            if player.name in group['name'].values:
-                formula = 1*player
-                team_total += formula
-                
-        
-        prob += (team_total <= 3)
-
-
-def solve_optimization_problem(available_players_df, bench_cost):
-
-    available_cash = 1000 - bench_cost
-
-    prob = pulp.LpProblem('InitialTeam', pulp.LpMaximize)
-    print("Available cash:", available_cash)
-    decision_variables = make_decision_variables(available_players_df)
-    print("Decision variables:", decision_variables)
-    prob += make_optimization_function(available_players_df, decision_variables)
-    print("Optimization function:", prob.objective)
-    prob += make_cash_constraint(available_players_df, decision_variables, available_cash)
-    prob += make_player_constraint(1, 1, decision_variables, available_players_df)  # GK: changed from 0 to 1
-    prob += make_player_constraint(2, 4, decision_variables, available_players_df)  # DEF: changed from 1 to 2
-    prob += make_player_constraint(3, 4, decision_variables, available_players_df)  # MID: changed from 2 to 3
-    prob += make_player_constraint(4, 2, decision_variables, available_players_df)  # FWD: changed from 3 to 4
-
-    add_team_constraint(prob, available_players_df, decision_variables)
-
-    prob.writeLP('InitialTeam.lp')
-    prob.solve()
-
-    return prob
-
-
 def get_initial_team(prob, player_df):
     variable_names = [v.name for v in prob.variables()]
     variable_values = [v.varValue for v in prob.variables()]
@@ -159,9 +84,8 @@ def make_predicted_table(y_test, y_pred):
 
 
 def get_score(team_list, gw_df, sort_by='predicted'):
-    
     gw_score = gw_df[gw_df['name'].isin(team_list)].actual.sum() \
-        + gw_df[(gw_df['name'].isin(team_list)) & (gw_df['position_encoded']!= 1)].sort_values(sort_by, ascending=False).head(1).actual.values[0]  # Changed from != 0 to != 1
+        + gw_df[(gw_df['name'].isin(team_list)) & (gw_df['position_encoded'].isin([3, 4]))].sort_values(sort_by, ascending=False).head(1).actual.values[0] #only captain midfielders or strikers
 
     print(gw_df[gw_df['name'].isin(team_list)][['name', 'actual', 'predicted']])
     print("total_score for gameweek", gw_df['GW'].values[0], ":", gw_score)
@@ -188,8 +112,8 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
 
     summed_test = test.groupby('name', as_index=False).agg(agg_dict)
     summed_last_season = previous_season.groupby('name', as_index=False).agg(agg_dict)
-    summed_last_season['value'] = summed_last_season['value'].astype(int)
-    summed_test['value'] = summed_test['value'].astype(int)
+    summed_last_season['value'] = summed_last_season['value'].astype(float)
+    summed_test['value'] = summed_test['value'].astype(float)
 
     # Create the predicted table for all gameweeks
     predicted_df = make_predicted_table(y_test, predictions)
@@ -234,7 +158,7 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
         print(f"Players available for GW {gw}: {len(gw_player_data)}")
         
         if len(gw_player_data) == 0:
-            prob = solve_optimization_problem(available_players_df, bench_cost)
+            prob = solve_optimization_problem_for_gameweek(available_players_df, bench_cost, gw, maximizing_variable="total_points_last_season")
             initial_team_df = get_initial_team(prob, available_players_df)
             my_team = initial_team_df['name'].tolist()
             print("My team:", my_team)
@@ -254,14 +178,7 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
                 optimal_team_names = optimal_team_df['name'].tolist()
                 
                 # Calculate score for this gameweek using actual points
-                gw_actual_data = gw_predictions[gw_predictions['name'].isin(optimal_team_names)]
-                gw_score = gw_actual_data['actual'].sum()
-                print(gw_actual_data[['name', 'actual', 'predicted']])
-                # Add captain bonus (best performing outfield player gets double points)
-                outfield_players = gw_actual_data[gw_actual_data['position_encoded'] != 1]  # Changed from != 0 to != 1
-                if len(outfield_players) > 0:
-                    captain_bonus = outfield_players['actual'].max()
-                    gw_score += captain_bonus
+                gw_score = get_score(optimal_team_names, gw_predictions)
                 
                 total_score += gw_score
                 gw_scores.append(gw_score)
@@ -296,7 +213,7 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
     return results_df, total_score
 
 
-def solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw_num):
+def solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw_num, maximizing_variable="predicted"):
     """
     Solve optimization problem for a specific gameweek using predicted points as the objective.
     """
@@ -310,7 +227,7 @@ def solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw_num):
     # Objective function: maximize predicted points for this gameweek
     objective = ""
     for i, player in enumerate(decision_variables):
-        objective += gw_player_data.iloc[i]['predicted'] * player
+        objective += gw_player_data.iloc[i][maximizing_variable] * player
     prob += objective
     
     # Budget constraint
