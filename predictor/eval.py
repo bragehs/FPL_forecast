@@ -113,10 +113,10 @@ def solve_optimization_problem(available_players_df, bench_cost):
     prob += make_optimization_function(available_players_df, decision_variables)
     print("Optimization function:", prob.objective)
     prob += make_cash_constraint(available_players_df, decision_variables, available_cash)
-    prob += make_player_constraint(0, 1, decision_variables, available_players_df) 
-    prob += make_player_constraint(1, 4, decision_variables, available_players_df) 
-    prob += make_player_constraint(2, 4, decision_variables, available_players_df) 
-    prob += make_player_constraint(3, 2, decision_variables, available_players_df)
+    prob += make_player_constraint(1, 1, decision_variables, available_players_df)  # GK: changed from 0 to 1
+    prob += make_player_constraint(2, 4, decision_variables, available_players_df)  # DEF: changed from 1 to 2
+    prob += make_player_constraint(3, 4, decision_variables, available_players_df)  # MID: changed from 2 to 3
+    prob += make_player_constraint(4, 2, decision_variables, available_players_df)  # FWD: changed from 3 to 4
 
     add_team_constraint(prob, available_players_df, decision_variables)
 
@@ -158,206 +158,15 @@ def make_predicted_table(y_test, y_pred):
     return predictions_df
 
 
-def get_suggested_transfer(predicted_df, team_list, current_money):
-    
-    predicted_diff = 0
-    money_change = 0
-    suggested_in = ''
-    suggested_out = ''
-    team_df = predicted_df[(predicted_df['name'].isin(team_list))]
-
-
-    teams_dict = {}
-    for i, row in team_df.iterrows():
-        if row.team_x not in teams_dict:
-            teams_dict[row.team_x] = [row['name']]
-        else:
-            teams_dict[row.team_x].append(row['name'])
-
-
-    for position in [1, 2, 3]:
-        
-        # don't bother about keepers, variance in scores is not that great
-        # so, save the free transfer for other positions
-
-        player_df = predicted_df[predicted_df.position_encoded==position].sort_values('predicted', ascending=False).reset_index()
-        lowest_pos = 0
-        player_names = team_df[team_df.position_encoded==position]['name'].values
-        
-        # loop through the players for this position, and get the rank (row number) of the player with the lowest predicted score
-        for p in player_names:
-            player_pos = player_df[player_df['name']==p].index[0]
-            if player_pos > lowest_pos:
-                lowest_pos = player_pos
-                potential_out = p
-                potential_out_cost = team_df[team_df['name']==p].value.values[0]
-                potential_out_team = team_df[team_df['name']==p].team_x.values[0]
-
-            elif len(player_names) <= 1:
-                potential_out_cost = 0
-                potential_out_team = 'none'
-                potential_out = 'none'
-                
-        # get all players above this player
-        potential_players = player_df[:lowest_pos]
-        
-        # only keep players that we can afford
-        potential_players = potential_players[potential_players.value <= potential_out_cost + current_money]
-        
-        # only keep players who played (need a better way of doing this)
-        potential_players = potential_players[potential_players.minutes > 0]
-
-        # get the prediction difference for each suggested player
-        # select the one with the highest difference as the suggested transfer (compare across positons)
-        
-        potential_out_predicted = team_df[team_df['name']==p].predicted.values[0]
-
-        for i, row in potential_players.iterrows():
-            # skip if it is a player we already have
-            if row['name'] in team_list:
-                continue
-
-
-
-            # if there are no other players of the same team, it's ok to consider this player
-            # if not, check whether there are 3 players of the same team already
-            if row.team_x not in teams_dict:
-                pass
-            else:
-                if len(teams_dict[row.team_x]) == 3:
-                    # if there are already 3 players of the same team,
-                    # can't take another player of the same team
-                    # unless the suggested_out is the same team as suggested_in (direct swap)
-                   
-                    if row.team_x == potential_out_team:
-                        pass
-                    else:
-                        continue
-                else:
-                    pass
-                
-            
-            # check for difference in predictions
-            if row.predicted - potential_out_predicted > predicted_diff:
-                predicted_diff = row.predicted - potential_out_predicted
-                suggested_in = row['name']
-                suggested_out = potential_out
-                
-                # calculate change in money
-                money_change = potential_out_cost - row.value
-                
-    return suggested_in, suggested_out, money_change
-
-
 def get_score(team_list, gw_df, sort_by='predicted'):
     
     gw_score = gw_df[gw_df['name'].isin(team_list)].actual.sum() \
-        + gw_df[(gw_df['name'].isin(team_list)) & (gw_df['position_encoded']!= 0)].sort_values(sort_by, ascending=False).head(1).actual.values[0]
+        + gw_df[(gw_df['name'].isin(team_list)) & (gw_df['position_encoded']!= 1)].sort_values(sort_by, ascending=False).head(1).actual.values[0]  # Changed from != 0 to != 1
 
     print(gw_df[gw_df['name'].isin(team_list)][['name', 'actual', 'predicted']])
     print("total_score for gameweek", gw_df['GW'].values[0], ":", gw_score)
     return gw_score
 
-
-
-def get_performance(team_list, starting_money, gw_list,
-                   prediction_df):
-    
-    current_money = starting_money
-    total_score = 0
-    
-    
-    in_list = []
-    out_list = []
-    score_list = []
-    unplayed_list = []
-    
-    
-    for gw in gw_list:
-        print("Gameweek:", gw)
-        print("my team:", team_list)
-        gw_df = prediction_df[prediction_df.GW==gw]
-        money_change = 0
-        suggested_in = ''
-        suggested_out = ''
-        if gw > 1:
-            
-
-            suggested_in, suggested_out, money_change = get_suggested_transfer(gw_df, team_list, current_money)
-        
-            current_money += money_change
-
-            team_list.append(suggested_in)
-            team_list.remove(suggested_out)
-            
-        
-
-        ## Calculate scores
-        
-        gw_score = get_score(team_list, gw_df)
-
-        print("suggested in:", suggested_in)
-        print("suggested out:", suggested_out)
-        out_list.append(suggested_out)
-        in_list.append(suggested_in)
-        score_list.append(gw_score)
-        
-        total_score += gw_score
-        
-    out_df = pd.DataFrame({'GW': gw_list,
-                          'player_in': in_list,
-                          'player_out': out_list,
-                          'total_score': score_list})
-
-    
-    return out_df, total_score
-
-
-
-def get_season_performance(y_test, predictions, remaining_lagged_features):
-    """
-    Get the season performance of the team based on the predictions.
-    """ 
-    previous_season = pd.read_csv(data_path + '/val_data.csv')
-    test = pd.read_csv(data_path + '/test_data.csv')
-
-    group_key = 'name'
-    first_cols = ['team_x','season_x', 'position_encoded', 'element', 'value', 'position', 'was_home']
-
-    # Only use non-grouping columns in aggregation
-    agg_dict = {
-        col: 'first' if col in first_cols else 'sum'
-        for col in test.columns
-        if col != group_key
-    }
-
-    summed_test = test.groupby('name', as_index=False).agg(agg_dict)
-    summed_last_season = previous_season.groupby('name', as_index=False).agg(agg_dict)
-    summed_last_season['value'] = summed_last_season['value'].astype(int)
-    summed_test['value'] = summed_test['value'].astype(int)
-
-    available_players_df = make_available_players_df(summed_test, summed_last_season)
-
-    bench_player_names, bench_cost = get_cheapest_players(available_players_df)
-    print("Bench players:", bench_player_names)
-    print("Bench cost:", bench_cost)
-
-    predicted_df = make_predicted_table(y_test, predictions)
-    print("length available players df", len(available_players_df))
-    prob = solve_optimization_problem(available_players_df, bench_cost)
-    initial_team_df = get_initial_team(prob, available_players_df)
-    my_team = initial_team_df['name'].tolist()
-
-    print("My team:", my_team)
-    gameweeks = (test.GW).unique()
-    print("Gameweeks:", len(gameweeks))
-    starting_money = 1000 - bench_cost - initial_team_df.value.sum()
-    print("Starting money:", starting_money)
-
-    xgb_cv_perf, total_score = get_performance(my_team, starting_money, gameweeks,
-                    predicted_df)
-    
-    return xgb_cv_perf, total_score
 
 def season_performance_with_unlimited_transfers(y_test, predictions, remaining_lagged_features):
     """
@@ -449,7 +258,7 @@ def season_performance_with_unlimited_transfers(y_test, predictions, remaining_l
                 gw_score = gw_actual_data['actual'].sum()
                 print(gw_actual_data[['name', 'actual', 'predicted']])
                 # Add captain bonus (best performing outfield player gets double points)
-                outfield_players = gw_actual_data[gw_actual_data['position_encoded'] != 0]
+                outfield_players = gw_actual_data[gw_actual_data['position_encoded'] != 1]  # Changed from != 0 to != 1
                 if len(outfield_players) > 0:
                     captain_bonus = outfield_players['actual'].max()
                     gw_score += captain_bonus
@@ -511,9 +320,9 @@ def solve_optimization_problem_for_gameweek(gw_player_data, bench_cost, gw_num):
     prob += (budget_constraint <= available_cash)
     
     # Position constraints (1 GK, 4 DEF, 4 MID, 2 FWD)
-    for position in [0, 1, 2, 3]:
+    for position in [1, 2, 3, 4]:  # Changed from [0, 1, 2, 3] to [1, 2, 3, 4]
         position_constraint = ""
-        required_count = [1, 4, 4, 2][position]  # GK, DEF, MID, FWD
+        required_count = [1, 4, 4, 2][position-1]  # Adjusted index: GK, DEF, MID, FWD
         
         for i, player in enumerate(decision_variables):
             if gw_player_data.iloc[i]['position_encoded'] == position:

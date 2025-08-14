@@ -275,11 +275,12 @@ def preprocess_data(df,
     X_cont_df = pd.DataFrame(X_minmax_scaled, columns=min_max_features)
     X_cat_df = pd.DataFrame(X_categorical_encoded, 
                            columns=encoders['categorical'].get_feature_names_out(categorical_features))
+    position_column = pd.DataFrame(df['position_encoded'].values, columns=['position_encoded'])
     X_metadata_df = pd.DataFrame(X_metadata.values, columns=metadata_features)
     X_binary_df = pd.DataFrame(X_binary.values, columns=binary_features)
     target_df = pd.DataFrame(y.values, columns=[target])
     
-    X_processed = pd.concat([X_time_df, X_cont_df, X_cat_df, X_metadata_df, 
+    X_processed = pd.concat([X_time_df, X_cont_df, X_cat_df,position_column, X_metadata_df, 
                              X_binary_df, target_df], axis=1)
 
     if fit:
@@ -667,7 +668,7 @@ def main():
 
     data = filter_data(data)
 
-    data, lagged_features = player_lag_features(data, player_features_to_lag, [1, 3, 5,'all'])
+    data, lagged_features = player_lag_features(data, player_features_to_lag, [1,'all'])
 
     data = add_future_lagged_features(data)
     #include new lagged features
@@ -697,28 +698,31 @@ def main():
     test = preprocess_data(test, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
                                 binary_features=["was_home"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
+    
+    pickle.dump(scalers, open(os.path.join(base_path, "processed_data", "scalers.pkl"), "wb"))
+    pickle.dump(encoders, open(os.path.join(base_path, "processed_data", "encoders.pkl"), "wb"))
 
     position_columns = [col for col in train.columns if col.startswith("position_encoded")]
     lagged_features.extend(position_columns)
     lagged_features.remove("position_encoded")
-    _, removed_features = remove_correlated_features_advanced(
-    train[lagged_features], 
-    threshold=0.9,
-    exclude_columns=position_columns
-    )
-
+    """     _, removed_features = remove_correlated_features_advanced(
+        train[lagged_features], 
+        threshold=0.9,
+        exclude_columns=position_columns
+        )
+    """
     # Update lagged_features to only include remaining features
-    remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
-    pickle.dump(remaining_lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
+    #remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
+    pickle.dump(lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
     
-    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes']
-    needed_features = extra_needed + remaining_lagged_features
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes', 'position_encoded']
+    needed_features = extra_needed + lagged_features
 
-    for col in [col for col in needed_features if col not in ['season_x', 'name']]:
+    for col in [col for col in needed_features if col not in ['season_x', 'name', 'position_encoded']]:
         train[col] = train[col].astype(float)
         val[col] = val[col].astype(float)
         test[col] = test[col].astype(float)
-
+    print(train.columns)
     #also save data pre-sequences
     output_dir = os.path.join(base_path, "processed_data")
     train.to_csv(os.path.join(output_dir, "train_data.csv"), index=False)
