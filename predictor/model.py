@@ -92,7 +92,7 @@ class HybridLSTMAttn(nn.Module):
         transformer_layers=1,
         emb_sizes=None,              # dict like {'element': (n_elements, 32), 'team': (n_teams, 8), 'position': (n_pos, 4)}
         seq_len=5,
-        uncertainty=True
+        uncertainty=False
     ):
         super().__init__()
         self.uncertainty = uncertainty
