@@ -104,7 +104,6 @@ def train_model(
                 model_data = {
                     'model_state_dict': model.state_dict(),
                     'best_performance': float(best_performance),
-                    'input_dim': int(model.input_dim),
                     'hidden_dim': int(model.hidden_dim),
                     'transformer_heads': int(model.transformer_heads),
                     'transformer_layers': int(model.transformer_layers)}
