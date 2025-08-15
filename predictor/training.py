@@ -135,8 +135,8 @@ def train_model(
                     'model_state_dict': model.state_dict(),
                     'best_performance': float(best_performance),
                     'hidden_dim': int(model.hidden_dim),
-                    'transformer_heads': int(model.transformer_heads),
-                    'transformer_layers': int(model.transformer_layers)}
+                    'num_fc_layers': int(model.num_fc_layers),
+                    'num_layers': int(model.num_layers)}
                 torch.save(model_data, f"best_model.pth")
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
@@ -145,6 +145,7 @@ def hyperparameter_tuning(
         X_train, y_train, 
         X_val, y_val, 
         player_ids_train=None, player_ids_val=None,
+        player_vocab_size=None, player_embed_dim=None, unknown_player_index=None,
         transform=False, 
         epochs=10, n_trials=20, num_workers=0):
     """Random search for hyperparameter tuning"""
@@ -188,7 +189,10 @@ def hyperparameter_tuning(
             output_dim=1,
             num_layers=params['num_layers'],
             dropout=params['dropout'],
-            num_fc_layers=params['num_fc_layers']
+            num_fc_layers=params['num_fc_layers'],
+            player_vocab_size=player_vocab_size,
+            player_embed_dim=player_embed_dim,
+            unknown_player_index=unknown_player_index,
         )     
         # Train model
         val_rmse = train_model(
