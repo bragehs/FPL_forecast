@@ -5,6 +5,7 @@ import os
 import unidecode
 import torch
 import pickle
+import json
 
 position_mapping = {
     'GK': 1,
@@ -324,97 +325,6 @@ def player_lag_features(gw_df, features, lags):
     return out_df, lagged_features
 
 
-def remove_correlated_features_advanced(df, threshold=0.95, method='pearson', 
-                                       priority_columns=None, exclude_columns=None):
-    """
-    Remove highly correlated features with priority system.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        Input DataFrame
-    threshold : float, default=0.95
-        Correlation threshold above which features will be removed
-    method : str, default='pearson'
-        Correlation method ('pearson', 'kendall', 'spearman')
-    priority_columns : list, optional
-        Columns to prioritize keeping when choosing which to remove
-    exclude_columns : list, optional
-        Columns to exclude from correlation analysis (always keep)
-    
-    Returns:
-    --------
-    pandas.DataFrame : DataFrame with correlated features removed
-    dict : Dictionary with correlation info and removed columns
-    """
- 
-    # Handle exclusions
-    if exclude_columns is None:
-        exclude_columns = []
-    
-    # Only consider numeric columns, excluding specified ones
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    analysis_cols = [col for col in numeric_cols if col not in exclude_columns]
-    
-    # Calculate correlation matrix for analysis columns only
-    corr_matrix = df[analysis_cols].corr(method=method).abs()
-    
-    # Get upper triangle
-    upper_tri = corr_matrix.where(
-        np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
-    )
-    
-    # Find highly correlated pairs
-    highly_correlated_pairs = []
-    to_drop = set()
-    
-    for col in upper_tri.columns:
-        for idx in upper_tri.index:
-            if upper_tri.loc[idx, col] > threshold:
-                corr_value = upper_tri.loc[idx, col]
-                highly_correlated_pairs.append((idx, col, corr_value))
-                
-                # Decide which to drop based on priority
-                if priority_columns:
-                    if idx in priority_columns and col not in priority_columns:
-                        to_drop.add(col)
-                    elif col in priority_columns and idx not in priority_columns:
-                        to_drop.add(idx)
-                    elif idx in priority_columns and col in priority_columns:
-                        # Both are priority, keep the one that appears first in priority list
-                        idx_priority = priority_columns.index(idx) if idx in priority_columns else float('inf')
-                        col_priority = priority_columns.index(col) if col in priority_columns else float('inf')
-                        if idx_priority < col_priority:
-                            to_drop.add(col)
-                        else:
-                            to_drop.add(idx)
-                    else:
-                        # Neither is priority, drop the second one
-                        to_drop.add(col)
-                else:
-                    # No priority system, drop the second column
-                    to_drop.add(col)
-    
-    # Create cleaned dataframe
-    df_cleaned = df.drop(columns=list(to_drop))
-    
-    # Prepare return info
-    result_info = {
-        'removed_columns': list(to_drop),
-        'highly_correlated_pairs': highly_correlated_pairs,
-        'original_shape': df.shape,
-        'cleaned_shape': df_cleaned.shape,
-        'threshold': threshold
-    }
-    
-    print(f"Correlation analysis complete:")
-    print(f"  - Found {len(highly_correlated_pairs)} pairs with correlation > {threshold}")
-    print(f"  - Removed {len(to_drop)} columns")
-    print(f"  - Shape: {df.shape} -> {df_cleaned.shape}")
-    
-    return df_cleaned, result_info
-
-
 def create_sequences_train(df, past_sequences=5, future_sequences=3, meta_data=[]):
     """
     Create sequences of data for each player with mapping information.
@@ -648,7 +558,6 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
     
     return X_tensor, y_tensor, mapping_df
 
-
 def main():
     base_path = os.getcwd() + '/predictor/'
     file_path = os.path.join(base_path, "data/cleaned_merged_seasons.csv")
@@ -733,6 +642,7 @@ def main():
     for df in [train, val, test]:
         print(df.isna().sum())
 
+
     X_train, y_train, train_mapping = create_sequences_test(
         train[needed_features], 
         past_sequences=5, 
@@ -768,7 +678,36 @@ def main():
     torch.save(y_test, os.path.join(output_dir, "y_test.pt"))
     test_mapping.to_csv(os.path.join(output_dir, "test_mapping.csv"), index=False)
 
+    train_names = train_mapping['name'].astype(str).unique()
+    name_to_idx = {n: i for i, n in enumerate(sorted(train_names))}
+    unk_id = len(name_to_idx)
+    name_to_idx['<unk>'] = unk_id
+    idx_to_name = {v: k for k, v in name_to_idx.items()}
 
+    vocab_dir = os.path.join(output_dir, "vocab")
+    os.makedirs(vocab_dir, exist_ok=True)
+    with open(os.path.join(vocab_dir, "player_name_to_idx.json"), "w") as f:
+        json.dump(name_to_idx, f)
+    with open(os.path.join(vocab_dir, "idx_to_player_name.json"), "w") as f:
+        json.dump({str(k): v for k, v in idx_to_name.items()}, f)
+    with open(os.path.join(vocab_dir, "unk_id.txt"), "w") as f:
+        f.write(str(unk_id))
+
+
+    def map_player_ids(mapping_df):
+        mapping_df = mapping_df.sort_values('sequence_idx')
+        ids = mapping_df['name'].map(lambda x: name_to_idx.get(str(x), unk_id)).to_numpy()
+        assert (mapping_df['sequence_idx'].to_numpy() == np.arange(len(mapping_df))).all(), "sequence_idx not contiguous from 0"
+        return torch.tensor(ids, dtype=torch.long)
+
+    train_player_ids = map_player_ids(train_mapping)
+    val_player_ids = map_player_ids(val_mapping)
+    test_player_ids = map_player_ids(test_mapping)
+
+    torch.save(train_player_ids, os.path.join(output_dir, "train_player_ids.pt"))
+    torch.save(val_player_ids, os.path.join(output_dir, "val_player_ids.pt"))
+    torch.save(test_player_ids, os.path.join(output_dir, "test_player_ids.pt"))
+    print(f"Name vocab size (incl <unk>): {len(name_to_idx)}  unk_id={unk_id}")
 
 if __name__ == "__main__":
     main()

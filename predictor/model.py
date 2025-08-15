@@ -16,22 +16,61 @@ class LSTMEncoderOnly(nn.Module):
     
 
 class AdvancedLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim=1, num_layers=3, dropout=0.3, num_fc_layers=2):
+    """
+    Advanced LSTM with optional:
+      - Position embeddings (per time step)
+      - Player embeddings (per sequence, broadcast across time)
+    Unknown player handling: supply player_vocab_size including an <unk> slot
+    and (optionally) unknown_player_index. Any OOV player id should be set to
+    unknown_player_index before calling forward.
+    """
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim=1,
+        num_layers=3,
+        dropout=0.3,
+        num_fc_layers=2,
+        position_vocab_size=None,
+        position_embed_dim=4,
+        player_vocab_size=None,
+        player_embed_dim=16,
+        unknown_player_index=None
+    ):
         super().__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.input_dim = input_dim
+        self.numeric_input_dim = input_dim
+        self.use_position = position_vocab_size is not None
+        self.use_player = player_vocab_size is not None
+
+        if self.use_position:
+            self.position_embedding = nn.Embedding(position_vocab_size, position_embed_dim)
+        else:
+            position_embed_dim = 0
+
+        if self.use_player:
+            if unknown_player_index is None:
+                unknown_player_index = player_vocab_size - 1  # assume last index reserved
+            self.unknown_player_index = unknown_player_index
+            self.player_embedding = nn.Embedding(player_vocab_size, player_embed_dim)
+        else:
+            player_embed_dim = 0
+            self.unknown_player_index = None
+
+        total_input_dim = input_dim + position_embed_dim + player_embed_dim
+
+        self.lstm = nn.LSTM(total_input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
         self.num_fc_layers = num_fc_layers
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
-        # Build dynamic FC layers
         self.fc_layers = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
         
         current_dim = hidden_dim
         for i in range(num_fc_layers):
             next_dim = current_dim // 2 if i < num_fc_layers - 1 else output_dim
-            if i == num_fc_layers - 1:  # Last layer
+            if i == num_fc_layers - 1:
                 self.fc_layers.append(nn.Linear(current_dim, output_dim))
             else:
                 self.fc_layers.append(nn.Linear(current_dim, next_dim))
@@ -39,132 +78,61 @@ class AdvancedLSTM(nn.Module):
             current_dim = next_dim
         
         self.dropout = nn.Dropout(dropout)
+        self.embedding_dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x_numeric, pos_ids=None, player_ids=None):
+        """
+        x_numeric: (batch, seq_len, numeric_input_dim)
+        pos_ids:   (batch, seq_len) long tensor of position indices (optional)
+        player_ids:(batch,) long tensor of player indices (optional)
+        """
+        batch, seq_len, _ = x_numeric.shape
+        parts = [x_numeric]
+
+        if self.use_position:
+            if pos_ids is None:
+                raise ValueError("pos_ids must be provided when position embeddings are enabled.")
+            pos_emb = self.position_embedding(pos_ids)  # (batch, seq_len, pos_embed_dim)
+            parts.append(pos_emb)
+
+        if self.use_player:
+            if player_ids is None:
+                raise ValueError("player_ids must be provided when player embeddings are enabled.")
+            # Replace OOV ids (if any negative or >= vocab) with unknown index
+            # (Assumes user might pre-map; this is a safety net.)
+            player_ids_clamped = player_ids.clone()
+            player_ids_clamped[(player_ids_clamped < 0) | (player_ids_clamped >= self.player_embedding.num_embeddings)] = self.unknown_player_index
+            pl_emb = self.player_embedding(player_ids_clamped)  # (batch, player_embed_dim)
+            pl_emb = pl_emb.unsqueeze(1).expand(-1, seq_len, -1)  # broadcast across time
+            parts.append(pl_emb)
+
+        x = torch.cat(parts, dim=-1)
+        x = self.embedding_dropout(x)
+
         _, (hidden, _) = self.lstm(x)
         hidden_last = hidden[-1]
         
-        # Dynamic multi-layer head with batch norm
         out = hidden_last
         for i in range(self.num_fc_layers):
             out = self.fc_layers[i](out)
-            if i < self.num_fc_layers - 1:  # Not the last layer
+            if i < self.num_fc_layers - 1:
                 out = self.batch_norms[i](out)
                 out = self.relu(out)
                 out = self.dropout(out)
-        
         return out
+
+    def map_player_names(self, names, name_to_id):
+        """
+        Utility to map list of player names to tensor of ids with unknown fallback.
+        name_to_id should already contain the unknown key if desired, else unknown index used.
+        """
+        ids = []
+        for n in names:
+            ids.append(name_to_id.get(n, self.unknown_player_index))
+        return torch.tensor(ids, dtype=torch.long)
     
-class AttentionPooling(nn.Module):
-    def __init__(self, hidden_dim):
-        super().__init__()
-        self.attn = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)
-        )
 
-    def forward(self, x, mask=None):
-        # x: (batch, seq, hidden)
-        scores = self.attn(x).squeeze(-1)              # (batch, seq)
-        if mask is not None:
-            scores = scores.masked_fill(~mask, -1e9)
-        weights = torch.softmax(scores, dim=-1)        # (batch, seq)
-        pooled = torch.sum(x * weights.unsqueeze(-1), dim=1)
-        return pooled, weights
-
-
-class HybridLSTMAttn(nn.Module):
-    """
-    LSTM -> (optional Transformer layer) -> (mean + max + attention pooled concat) -> MLP head(s).
-    Also outputs predictive mean and log_var for heteroscedastic regression.
-    """
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim=128,
-        output_dim=1,
-        num_layers=2,
-        dropout=0.3,
-        use_transformer=True,
-        transformer_heads=4,
-        transformer_layers=1,
-        emb_sizes=None,              # dict like {'element': (n_elements, 32), 'team': (n_teams, 8), 'position': (n_pos, 4)}
-        seq_len=5,
-        uncertainty=False
-    ):
-        super().__init__()
-        self.uncertainty = uncertainty
-        self.use_transformer = use_transformer
-        self.seq_len = seq_len
-        self.hidden_dim = hidden_dim
-        self.transformer_heads = transformer_heads
-        self.transformer_layers = transformer_layers
-        self.num_layers = num_layers
-
-        self.embeddings = nn.ModuleDict()
-        emb_out_dim = 0
-        if emb_sizes:
-            for key, (num, dim) in emb_sizes.items():
-                self.embeddings[key] = nn.Embedding(num, dim)
-                emb_out_dim += dim
-
-        self.lstm_input_dim = input_dim + emb_out_dim
-        self.lstm = nn.LSTM(self.lstm_input_dim, hidden_dim, num_layers,
-                            batch_first=True, dropout=dropout if num_layers > 1 else 0.0)
-
-        if use_transformer:
-            enc_layer = nn.TransformerEncoderLayer(
-                d_model=hidden_dim,
-                nhead=transformer_heads,
-                dim_feedforward=hidden_dim * 4,
-                dropout=dropout,
-                batch_first=True
-            )
-            self.transformer = nn.TransformerEncoder(enc_layer, num_layers=transformer_layers)
-        else:
-            self.transformer = None
-
-        self.layer_norm = nn.LayerNorm(hidden_dim)
-
-        self.attn_pool = AttentionPooling(hidden_dim)
-        self.proj = nn.Linear(hidden_dim * 3, hidden_dim)
-
-        self.head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, output_dim if not uncertainty else output_dim * 2)
-        )
-
-    def forward(self, x, emb_inputs=None, mask=None):
-        # x: (batch, seq, feat)
-        if emb_inputs:
-            emb_cat = []
-            for k, tensor in emb_inputs.items():
-                emb_cat.append(self.embeddings[k](tensor))  # (batch, seq, emb_dim)
-            emb_cat = torch.cat(emb_cat, dim=-1)  # (batch, seq, sum_emb)
-            x = torch.cat([x, emb_cat], dim=-1)
-        lstm_out, _ = self.lstm(x)               # (batch, seq, hidden)
-
-        if self.transformer:
-            lstm_out = self.transformer(lstm_out)
-
-        lstm_out = self.layer_norm(lstm_out)
-
-        mean_pool = lstm_out.mean(dim=1)
-        max_pool, _ = lstm_out.max(dim=1)
-        attn_pool, _ = self.attn_pool(lstm_out, mask=mask)
-
-        fused = torch.cat([mean_pool, max_pool, attn_pool], dim=-1)
-        fused = self.proj(fused)
-
-        out = self.head(fused)
-        if self.uncertainty:
-            mean, log_var = out.chunk(2, dim=-1)
-            return mean, log_var
-        return out
 
 if __name__ == "__main__":
     #do some testing
@@ -181,31 +149,36 @@ if __name__ == "__main__":
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in model: {num_params}")
 
-    adv_model = AdvancedLSTM(input_dim=26, hidden_dim=128, output_dim=1, num_layers=3, dropout=0.3, num_fc_layers=3)
-    print("\nAdvanced Model Architecture:")
-    print(adv_model.lstm.dropout)
-    adv_output = adv_model(input_tensor)
-    print("Advanced model output shape:", adv_output.shape)
+    # Advanced model WITHOUT embeddings (backward compatible)
+    adv_model_plain = AdvancedLSTM(input_dim=26, hidden_dim=128, output_dim=1, num_layers=3, dropout=0.3, num_fc_layers=3)
+    print("Advanced (no embeddings) output shape:", adv_model_plain(input_tensor).shape)
 
-    adv_num_params = sum(p.numel() for p in adv_model.parameters())
-    print(f"Number of parameters in advanced model: {adv_num_params}")
+    # Advanced model WITH position & player embeddings
+    position_vocab_size = 4          # e.g., GK, DEF, MID, FWD + variants
+    player_vocab_size = 1000 + 1     # include +1 for <unk>
+    unknown_idx = player_vocab_size - 1
 
-    model = HybridLSTMAttn(
+    adv_model_embed = AdvancedLSTM(
         input_dim=26,
         hidden_dim=128,
         output_dim=1,
-        num_layers=2,
+        num_layers=3,
         dropout=0.3,
-        use_transformer=True,
-        transformer_heads=4,
-        transformer_layers=1,
-        #emb_sizes={'element': (10, 32), 'team': (20, 8), 'position': (5, 4)},
-        seq_len=5,
-        uncertainty=False
+        num_fc_layers=3,
+        position_vocab_size=position_vocab_size,
+        position_embed_dim=6,
+        player_vocab_size=player_vocab_size,
+        player_embed_dim=24,
+        unknown_player_index=unknown_idx
     )
 
-    training_output = model(input_tensor)
-    print("output shape:", training_output.shape)
+    # Fake ids
+    pos_ids = torch.randint(0, position_vocab_size, (32, 5))          # (batch, seq_len)
+    player_ids = torch.randint(0, player_vocab_size - 1, (32,))    
+    print(pos_ids.shape, player_ids.shape)   # exclude unknown for most
+    player_ids[0] = 50000  # OOV example -> will be mapped to unknown
 
-    num_params = sum(p.numel() for p in model.parameters())
-    print(f"Number of parameters in model: {num_params}")
+    output_with_emb = adv_model_embed(input_tensor, pos_ids=pos_ids, player_ids=player_ids)
+    print("Advanced (with embeddings) output shape:", output_with_emb.shape)
+    num_params_embed = sum(p.numel() for p in adv_model_embed.parameters())
+    print(f"Number of parameters in advanced model (with embeddings): {num_params_embed}")

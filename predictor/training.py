@@ -2,15 +2,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from model import HybridLSTMAttn
+from model import AdvancedLSTM
 import os
 import numpy as np
 import random
     
 
 class Seq2OutputDataset(Dataset):
-    def __init__(self, X, y, transform=False):
+    def __init__(self, X, y, player_ids=None, transform=False):
         self.X = X
+        self.player_ids = player_ids
         if transform:
             self.y = torch.log1p(y) 
         else:
@@ -20,14 +21,21 @@ class Seq2OutputDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        x= self.X[idx]
+        y = self.y[idx]
+        if self.player_ids is not None:
+            player_id = self.player_ids[idx]
+            return x, y, player_id
+        return x, y
 
 def train_model(
         model,
         X_train, 
         y_train, 
         X_val, 
-        y_val, 
+        y_val,
+        player_ids_train=None,
+        player_ids_val=None,
         epochs=20,
         learning_rate=1e-4,
         weight_decay=1e-5,
@@ -39,8 +47,8 @@ def train_model(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_dataset = Seq2OutputDataset(X_train, y_train, transform=transform)
-    val_dataset = Seq2OutputDataset(X_val, y_val)
+    train_dataset = Seq2OutputDataset(X_train, y_train, player_ids=player_ids_train, transform=transform)
+    val_dataset = Seq2OutputDataset(X_val, y_val, player_ids=player_ids_val, transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
@@ -51,6 +59,16 @@ def train_model(
     criterion = torch.nn.MSELoss() 
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
+
+    def forward_model(x, pid=None, pos=None):
+        kwargs = {}
+        if hasattr(model, 'use_player') and getattr(model, 'use_player') and pid is not None:
+            kwargs['player_ids'] = pid
+        try:
+            return model(x, **kwargs) if kwargs else model(x)
+        except TypeError:
+            return model(x)
+        
     # --- Training loop ---
     for epoch in range(epochs):
         model.train()
@@ -59,10 +77,16 @@ def train_model(
             progress = tqdm(train_loader, desc=f"Epoch {epoch+1:2d}/{epochs}")
         else:
             progress = train_loader
-        for X_batch, y_batch in progress:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        for batch in progress:
+            if len(batch) > 2:
+                X_batch, y_batch, pid_batch = batch
+                X_batch, y_batch, pid_batch = X_batch.to(device), y_batch.to(device), pid_batch.to(device)
+            else:
+                X_batch, y_batch = batch
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                pid_batch = None
             optimizer.zero_grad()
-            output = model(X_batch)
+            output = forward_model(X_batch, pid_batch)
             loss = criterion(output, y_batch)
             loss.backward()
             optimizer.step()
@@ -82,9 +106,15 @@ def train_model(
         val_performance = 0
         mae_loss = 0
         with torch.no_grad():
-            for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                output = model(X_batch)
+            for batch in val_loader:
+                if len(batch) > 2:
+                    X_batch, y_batch, pid_batch = batch
+                    X_batch, y_batch, pid_batch = X_batch.to(device), y_batch.to(device), pid_batch.to(device)
+                else:
+                    X_batch, y_batch = batch
+                    X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                    pid_batch = None
+                output = forward_model(X_batch, pid_batch)
                 if transform:
                     output = torch.expm1(output)
                 loss = criterion(output, y_batch)
@@ -111,7 +141,12 @@ def train_model(
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
-def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epochs=10, n_trials=20, num_workers=0):
+def hyperparameter_tuning(
+        X_train, y_train, 
+        X_val, y_val, 
+        player_ids_train=None, player_ids_val=None,
+        transform=False, 
+        epochs=10, n_trials=20, num_workers=0):
     """Random search for hyperparameter tuning"""
     
     # Define hyperparameter ranges
@@ -121,7 +156,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
         'num_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'transformer_layers': [1, 2, 3, 4],
+        'num_fc_layers': [1, 2, 3, 4],
         'batch_size': [32, 64, 128, 256]
     }
     
@@ -139,7 +174,7 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
             'weight_decay': random.choice(param_ranges['weight_decay']),
             'num_layers': random.choice(param_ranges['num_layers']),
             'dropout': random.choice(param_ranges['dropout']),
-            'transformer_layers': random.choice(param_ranges['transformer_layers']),
+            'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
             'batch_size': random.choice(param_ranges['batch_size']),
         }
         
@@ -147,13 +182,13 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
         print(f"Params: {params}")
         
         # Create model with sampled parameters
-        model = HybridLSTMAttn(
+        model = AdvancedLSTM(
             input_dim=X_train.shape[-1], 
             hidden_dim=params['hidden_dim'], 
             output_dim=1,
             num_layers=params['num_layers'],
             dropout=params['dropout'],
-            transformer_layers=params['transformer_layers']
+            num_fc_layers=params['num_fc_layers']
         )     
         # Train model
         val_rmse = train_model(
@@ -162,6 +197,8 @@ def hyperparameter_tuning(X_train, y_train, X_val, y_val, transform=False, epoch
             y_train=y_train,
             X_val=X_val, 
             y_val=y_val, 
+            player_ids_train=player_ids_train,
+            player_ids_val=player_ids_val,
             learning_rate=params['learning_rate'],
             weight_decay=params['weight_decay'],
             batch_size=params['batch_size'],
