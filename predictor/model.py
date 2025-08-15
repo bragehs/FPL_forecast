@@ -98,6 +98,10 @@ class HybridLSTMAttn(nn.Module):
         self.uncertainty = uncertainty
         self.use_transformer = use_transformer
         self.seq_len = seq_len
+        self.hidden_dim = hidden_dim
+        self.transformer_heads = transformer_heads
+        self.transformer_layers = transformer_layers
+        self.num_layers = num_layers
 
         self.embeddings = nn.ModuleDict()
         emb_out_dim = 0
