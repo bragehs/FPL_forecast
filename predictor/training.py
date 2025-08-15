@@ -54,8 +54,8 @@ def train_model(
 
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rate,
-                                                    steps_per_epoch=len(train_loader), epochs=epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    optimizer, T_0=5, T_mult=2, eta_min=learning_rate * 0.01)
     criterion = torch.nn.MSELoss() 
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
@@ -90,7 +90,6 @@ def train_model(
             loss = criterion(output, y_batch)
             loss.backward()
             optimizer.step()
-            scheduler.step()
             epoch_loss += loss.item() * X_batch.size(0)
             if verbose >= 2 and hasattr(progress, 'set_postfix'):
                 progress.set_postfix(loss=f"{loss.item():.4f}", lr=optimizer.param_groups[0]['lr'])
@@ -127,7 +126,8 @@ def train_model(
             print(f"Epoch {epoch+1} validation RMSE: {avg_val_performance:.4f}")
             print(f"Epoch {epoch+1} validation MAE: {avg_mae_loss:.4f}")
 
-
+        scheduler.step()
+        
         if avg_val_performance < best_performance:
             best_performance = avg_val_performance
             if verbose >= 2:
