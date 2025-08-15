@@ -28,9 +28,6 @@ player_features_to_lag = [
      'threat',
      'red_cards',
      'yellow_cards',
-     'expected_goals',
-     'expected_assists',
-     'expected_goals_conceded',
     ]
 
 
@@ -130,9 +127,7 @@ def filter_data(df):
     df = df[df['position'] != 'AM']  # Exclude managers
     df['season_progress'] = df['GW'] / df['GW'].max()
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
-    df = df[df['minutes'] > 0]  # Exclude players with 0 minutes
-    df['is_xg_available'] = df['expected_goals'].notna().astype(int)
-    df[['expected_goals', 'expected_assists', 'expected_goals_conceded']] = df[['expected_goals', 'expected_assists', 'expected_goals_conceded']].fillna(df[['expected_goals', 'expected_assists', 'expected_goals_conceded']].mean()) 
+    #df = df[df['minutes'] > 0]  # Exclude players with 0 minutes
     return df
 
 def add_fixture_difficulty_to_dataframe(df, backend_root):
@@ -586,7 +581,7 @@ def main():
 
     data = add_future_lagged_features(data)
     #include new lagged features
-    lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded", "is_xg_available"])
+    lagged_features.extend(["lagged_fixture_difficulty", "lagged_was_home", "position_encoded"])
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "position_encoded", "total_points"]]
