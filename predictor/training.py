@@ -134,8 +134,8 @@ def train_model(
                 print(f"Epoch {epoch+1} Training MSE: {avg_loss:.4f}")
         # --- Validation loop ---
         model.eval()
-        val_performance = 0
-        mae_loss = 0
+        sse = 0.0          # sum of squared errors
+        mae_sum = 0.0
         with torch.no_grad():
             for batch in val_loader:
                 if len(batch) == 2:
