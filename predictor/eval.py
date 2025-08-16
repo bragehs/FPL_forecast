@@ -74,6 +74,7 @@ def make_predicted_table(y_test, y_pred):
     predictions_df = test_mapping.copy()
     predictions_df['actual'] = y_test
     predictions_df['predicted'] = y_pred
+    predictions_df['predicted'] = predictions_df['predicted'].where(predictions_df['minutes'] > 0, 0)
     predictions_df.rename(columns={'prediction_gw': 'GW'}, inplace=True)
 
 

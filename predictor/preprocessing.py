@@ -28,9 +28,6 @@ player_features_to_lag = [
      'threat',
      'red_cards',
      'yellow_cards',
-     'expected_goals',
-     'expected_assists',
-     'expected_goals_conceded',
     ]
 
 
@@ -131,8 +128,6 @@ def filter_data(df):
     df['season_progress'] = df['GW'] / df['GW'].max()
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
     #df = df[df['minutes'] > 0]  # Exclude players with 0 minutes
-    df['is_xg_available'] = df['expected_goals'].notna().astype(int)
-    df[['expected_goals', 'expected_assists', 'expected_goals_conceded']] = df[['expected_goals', 'expected_assists', 'expected_goals_conceded']].fillna(0.0)
     return df
 
 def add_fixture_difficulty_to_dataframe(df, backend_root):
@@ -604,10 +599,10 @@ def main():
     meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes', 'position_encoded', 'lagged_fixture_difficulty']
 
     seasons = np.unique(data["season_x"])
-    number_of_training_seasons = len(seasons) - 1
+    number_of_training_seasons = len(seasons) - 2
     train_seasons = seasons[:number_of_training_seasons]
-    val_seasons = seasons[number_of_training_seasons:]
-    test_seasons = seasons[number_of_training_seasons:]
+    val_seasons = seasons[number_of_training_seasons:number_of_training_seasons + 1]
+    test_seasons = seasons[number_of_training_seasons + 1:]
     print("train seasons:", train_seasons)
     print("val seasons:", val_seasons)
     print("test seasons:", test_seasons)

@@ -152,12 +152,14 @@ def train_model(
                 output = forward_model(X_batch, pid_batch, pos_batch, fixd_batch)
                 if transform:
                     output = torch.expm1(output)
-                loss = criterion(output, y_batch)
-                _mae = mae(output, y_batch)
-                val_performance += np.sqrt(loss.item()) * X_batch.size(0)
-                mae_loss += _mae.item() * X_batch.size(0)
-        avg_val_performance = val_performance / len(val_loader.dataset)
-        avg_mae_loss = mae_loss / len(val_loader.dataset)
+                batch_mse = criterion(output, y_batch)              # mean over batch
+                batch_mae = mae(output, y_batch)
+
+                bs = X_batch.size(0)
+                sse += batch_mse.item() * bs                        # MSE * batch_size = SSE
+                mae_sum += batch_mae.item() * bs
+        avg_val_performance = (sse / len(val_loader.dataset)) ** 0.5
+        avg_mae_loss = mae_sum / len(val_loader.dataset)
         if verbose >= 2:
             print(f"Epoch {epoch+1} validation RMSE: {avg_val_performance:.4f}")
             print(f"Epoch {epoch+1} validation MAE: {avg_mae_loss:.4f}")
