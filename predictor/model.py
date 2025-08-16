@@ -32,6 +32,10 @@ class AdvancedLSTM(nn.Module):
                  fixture_diff_vocab_size=None,
                  fixture_diff_embed_dim=4):
         super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.num_fc_layers = num_fc_layers
         self.use_position = position_vocab_size is not None
         self.use_player = player_vocab_size is not None
         self.use_fixdiff = fixture_diff_vocab_size is not None
