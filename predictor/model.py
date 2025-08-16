@@ -15,123 +15,93 @@ class LSTMEncoderOnly(nn.Module):
         return out
     
 
+# ...existing code...
 class AdvancedLSTM(nn.Module):
-    """
-    Advanced LSTM with optional:
-      - Position embeddings (per time step)
-      - Player embeddings (per sequence, broadcast across time)
-    Unknown player handling: supply player_vocab_size including an <unk> slot
-    and (optionally) unknown_player_index. Any OOV player id should be set to
-    unknown_player_index before calling forward.
-    """
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        output_dim=1,
-        num_layers=3,
-        dropout=0.3,
-        num_fc_layers=2,
-        position_vocab_size=None,
-        position_embed_dim=4,
-        player_vocab_size=None,
-        player_embed_dim=16,
-        unknown_player_index=None
-    ):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 output_dim=1,
+                 num_layers=3,
+                 dropout=0.3,
+                 num_fc_layers=2,
+                 position_vocab_size=None,
+                 position_embed_dim=4,
+                 player_vocab_size=None,
+                 player_embed_dim=16,
+                 unknown_player_index=None,
+                 fixture_diff_vocab_size=None,
+                 fixture_diff_embed_dim=4):
         super().__init__()
-        self.numeric_input_dim = input_dim
         self.use_position = position_vocab_size is not None
         self.use_player = player_vocab_size is not None
+        self.use_fixdiff = fixture_diff_vocab_size is not None
 
         if self.use_position:
-            self.position_embedding = nn.Embedding(position_vocab_size, position_embed_dim)
+            self.position_embedding = nn.Embedding(position_vocab_size, position_embed_dim, padding_idx=0)
         else:
             position_embed_dim = 0
 
         if self.use_player:
             if unknown_player_index is None:
-                unknown_player_index = player_vocab_size - 1  # assume last index reserved
+                unknown_player_index = player_vocab_size - 1
             self.unknown_player_index = unknown_player_index
             self.player_embedding = nn.Embedding(player_vocab_size, player_embed_dim)
         else:
             player_embed_dim = 0
             self.unknown_player_index = None
 
-        total_input_dim = input_dim + position_embed_dim + player_embed_dim
+        if self.use_fixdiff:
+            self.fixdiff_embedding = nn.Embedding(fixture_diff_vocab_size, fixture_diff_embed_dim, padding_idx=0)
+        else:
+            fixture_diff_embed_dim = 0
+
+        total_input_dim = input_dim + position_embed_dim + player_embed_dim + fixture_diff_embed_dim
 
         self.lstm = nn.LSTM(total_input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.num_fc_layers = num_fc_layers
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        
-        self.fc_layers = nn.ModuleList()
-        self.batch_norms = nn.ModuleList()
-        
-        current_dim = hidden_dim
-        for i in range(num_fc_layers):
-            next_dim = current_dim // 2 if i < num_fc_layers - 1 else output_dim
-            if i == num_fc_layers - 1:
-                self.fc_layers.append(nn.Linear(current_dim, output_dim))
-            else:
-                self.fc_layers.append(nn.Linear(current_dim, next_dim))
-                self.batch_norms.append(nn.BatchNorm1d(next_dim))
-            current_dim = next_dim
-        
         self.dropout = nn.Dropout(dropout)
-        self.embedding_dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU()
 
-    def forward(self, x_numeric, pos_ids=None, player_ids=None):
-        """
-        x_numeric: (batch, seq_len, numeric_input_dim)
-        pos_ids:   (batch, seq_len) long tensor of position indices (optional)
-        player_ids:(batch,) long tensor of player indices (optional)
-        """
-        batch, seq_len, _ = x_numeric.shape
+        fc_layers = []
+        cur = hidden_dim
+        for i in range(num_fc_layers - 1):
+            nxt = max(output_dim, cur // 2)
+            fc_layers += [nn.Linear(cur, nxt), nn.BatchNorm1d(nxt), nn.ReLU(), nn.Dropout(dropout)]
+            cur = nxt
+        fc_layers.append(nn.Linear(cur, output_dim))
+        self.head = nn.Sequential(*fc_layers)
+
+    def forward(self, x_numeric, pos_ids=None, player_ids=None, fixdiff_ids=None):
+        # x_numeric: (B,T,feat)
+        B, T, _ = x_numeric.shape
         parts = [x_numeric]
 
         if self.use_position:
             if pos_ids is None:
-                raise ValueError("pos_ids must be provided when position embeddings are enabled.")
-            pos_emb = self.position_embedding(pos_ids)  # (batch, seq_len, pos_embed_dim)
+                raise ValueError("pos_ids required")
+            # pos_ids: (B,T) or (B,) -> ensure (B,T)
+            if pos_ids.dim() == 1:
+                pos_ids = pos_ids.unsqueeze(1).expand(-1, T)
+            pos_emb = self.position_embedding(pos_ids)  # (B,T,Ep)
             parts.append(pos_emb)
 
         if self.use_player:
             if player_ids is None:
-                raise ValueError("player_ids must be provided when player embeddings are enabled.")
-            # Replace OOV ids (if any negative or >= vocab) with unknown index
-            # (Assumes user might pre-map; this is a safety net.)
-            player_ids_clamped = player_ids.clone()
-            player_ids_clamped[(player_ids_clamped < 0) | (player_ids_clamped >= self.player_embedding.num_embeddings)] = self.unknown_player_index
-            pl_emb = self.player_embedding(player_ids_clamped)  # (batch, player_embed_dim)
-            pl_emb = pl_emb.unsqueeze(1).expand(-1, seq_len, -1)  # broadcast across time
+                raise ValueError("player_ids required")
+            pid = player_ids.clone()
+            pid[(pid < 0) | (pid >= self.player_embedding.num_embeddings)] = self.unknown_player_index
+            pl_emb = self.player_embedding(pid).unsqueeze(1).expand(-1, T, -1)
             parts.append(pl_emb)
 
+        if self.use_fixdiff:
+            if fixdiff_ids is None:
+                raise ValueError("fixdiff_ids required")
+            fixdiff_emb = self.fixdiff_embedding(fixdiff_ids)  # (B,T,Ef)
+            parts.append(fixdiff_emb)
+
         x = torch.cat(parts, dim=-1)
-        x = self.embedding_dropout(x)
-
-        _, (hidden, _) = self.lstm(x)
-        hidden_last = hidden[-1]
-        
-        out = hidden_last
-        for i in range(self.num_fc_layers):
-            out = self.fc_layers[i](out)
-            if i < self.num_fc_layers - 1:
-                out = self.batch_norms[i](out)
-                out = self.relu(out)
-                out = self.dropout(out)
-        return out
-
-    def map_player_names(self, names, name_to_id):
-        """
-        Utility to map list of player names to tensor of ids with unknown fallback.
-        name_to_id should already contain the unknown key if desired, else unknown index used.
-        """
-        ids = []
-        for n in names:
-            ids.append(name_to_id.get(n, self.unknown_player_index))
-        return torch.tensor(ids, dtype=torch.long)
-    
+        _, (h, _) = self.lstm(x)
+        h_last = h[-1]
+        return self.head(h_last)
 
 
 if __name__ == "__main__":

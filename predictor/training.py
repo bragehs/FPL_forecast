@@ -9,11 +9,17 @@ import random
     
 
 class Seq2OutputDataset(Dataset):
-    def __init__(self, X, y, player_ids=None, transform=False):
+    def __init__(self, X, y,
+                 player_ids=None,
+                 pos_ids=None,
+                 fixdiff_ids=None,
+                 transform=False):
         self.X = X
-        self.player_ids = player_ids
+        self.player_ids = player_ids          # (N,)
+        self.pos_ids = pos_ids                # (N, seq_len)
+        self.fixdiff_ids = fixdiff_ids        # (N, seq_len)
         if transform:
-            self.y = torch.log1p(y) 
+            self.y = torch.log1p(y)
         else:
             self.y = y
 
@@ -21,21 +27,28 @@ class Seq2OutputDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        x= self.X[idx]
+        x = self.X[idx]
         y = self.y[idx]
-        if self.player_ids is not None:
-            player_id = self.player_ids[idx]
-            return x, y, player_id
-        return x, y
+        pid = self.player_ids[idx] if self.player_ids is not None else None
+        pos = self.pos_ids[idx] if self.pos_ids is not None else None
+        fixd = self.fixdiff_ids[idx] if self.fixdiff_ids is not None else None
+        # Return only what exists (keeps compatibility)
+        if pid is None and pos is None and fixd is None:
+            return x, y
+        return x, y, pid, pos, fixd
 
 def train_model(
         model,
-        X_train, 
-        y_train, 
-        X_val, 
+        X_train,
+        y_train,
+        X_val,
         y_val,
         player_ids_train=None,
         player_ids_val=None,
+        pos_ids_train=None,
+        pos_ids_val=None,
+        fixdiff_ids_train=None,
+        fixdiff_ids_val=None,
         epochs=20,
         learning_rate=1e-4,
         weight_decay=1e-5,
@@ -47,23 +60,38 @@ def train_model(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_dataset = Seq2OutputDataset(X_train, y_train, player_ids=player_ids_train, transform=transform)
-    val_dataset = Seq2OutputDataset(X_val, y_val, player_ids=player_ids_val, transform=transform)
+    train_dataset = Seq2OutputDataset(
+        X_train, y_train,
+        player_ids=player_ids_train,
+        pos_ids=pos_ids_train,
+        fixdiff_ids=fixdiff_ids_train,
+        transform=transform
+    )
+    val_dataset = Seq2OutputDataset(
+        X_val, y_val,
+        player_ids=player_ids_val,
+        pos_ids=pos_ids_val,
+        fixdiff_ids=fixdiff_ids_val,
+        transform=transform
+    )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-    optimizer, T_0=5, T_mult=2, eta_min=learning_rate * 0.01)
+    scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=epochs, power=0.9)
     criterion = torch.nn.MSELoss() 
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
 
-    def forward_model(x, pid=None, pos=None):
+    def forward_model(x, pid=None, pos=None, fixd=None):
         kwargs = {}
-        if hasattr(model, 'use_player') and getattr(model, 'use_player') and pid is not None:
+        if getattr(model, 'use_player', False) and pid is not None:
             kwargs['player_ids'] = pid
+        if getattr(model, 'use_position', False) and pos is not None:
+            kwargs['pos_ids'] = pos
+        if getattr(model, 'use_fixdiff', False) and fixd is not None:
+            kwargs['fixdiff_ids'] = fixd
         try:
             return model(x, **kwargs) if kwargs else model(x)
         except TypeError:
@@ -78,15 +106,19 @@ def train_model(
         else:
             progress = train_loader
         for batch in progress:
-            if len(batch) > 2:
-                X_batch, y_batch, pid_batch = batch
-                X_batch, y_batch, pid_batch = X_batch.to(device), y_batch.to(device), pid_batch.to(device)
-            else:
+            if len(batch) == 2:
                 X_batch, y_batch = batch
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                pid_batch = None
+                pid_batch = pos_batch = fixd_batch = None
+            else:
+                X_batch, y_batch, pid_batch, pos_batch, fixd_batch = batch
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+            if pid_batch is not None: pid_batch = pid_batch.to(device)
+            if pos_batch is not None: pos_batch = pos_batch.to(device)
+            if fixd_batch is not None: fixd_batch = fixd_batch.to(device)
+
             optimizer.zero_grad()
-            output = forward_model(X_batch, pid_batch)
+            output = forward_model(X_batch, pid_batch, pos_batch, fixd_batch)
             loss = criterion(output, y_batch)
             loss.backward()
             optimizer.step()
@@ -106,14 +138,18 @@ def train_model(
         mae_loss = 0
         with torch.no_grad():
             for batch in val_loader:
-                if len(batch) > 2:
-                    X_batch, y_batch, pid_batch = batch
-                    X_batch, y_batch, pid_batch = X_batch.to(device), y_batch.to(device), pid_batch.to(device)
-                else:
+                if len(batch) == 2:
                     X_batch, y_batch = batch
-                    X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                    pid_batch = None
-                output = forward_model(X_batch, pid_batch)
+                    pid_batch = pos_batch = fixd_batch = None
+                else:
+                    X_batch, y_batch, pid_batch, pos_batch, fixd_batch = batch
+                X_batch = X_batch.to(device)
+                y_batch = y_batch.to(device)
+                if pid_batch is not None: pid_batch = pid_batch.to(device)
+                if pos_batch is not None: pos_batch = pos_batch.to(device)
+                if fixd_batch is not None: fixd_batch = fixd_batch.to(device)
+
+                output = forward_model(X_batch, pid_batch, pos_batch, fixd_batch)
                 if transform:
                     output = torch.expm1(output)
                 loss = criterion(output, y_batch)
@@ -142,11 +178,15 @@ def train_model(
     return best_performance
 
 def hyperparameter_tuning(
-        X_train, y_train, 
-        X_val, y_val, 
+        X_train, y_train,
+        X_val, y_val,
         player_ids_train=None, player_ids_val=None,
+        pos_ids_train=None, pos_ids_val=None,
+        fixdiff_ids_train=None, fixdiff_ids_val=None,
         player_vocab_size=None, player_embed_dim=None, unknown_player_index=None,
-        transform=False, 
+        position_vocab_size=None, position_embed_dim=None,
+        fixture_diff_vocab_size=None, fixture_diff_embed_dim=None,
+        transform=False,
         epochs=10, n_trials=20, num_workers=0):
     """Random search for hyperparameter tuning"""
     
@@ -184,8 +224,8 @@ def hyperparameter_tuning(
         
         # Create model with sampled parameters
         model = AdvancedLSTM(
-            input_dim=X_train.shape[-1], 
-            hidden_dim=params['hidden_dim'], 
+            input_dim=X_train.shape[-1],
+            hidden_dim=params['hidden_dim'],
             output_dim=1,
             num_layers=params['num_layers'],
             dropout=params['dropout'],
@@ -193,16 +233,22 @@ def hyperparameter_tuning(
             player_vocab_size=player_vocab_size,
             player_embed_dim=player_embed_dim,
             unknown_player_index=unknown_player_index,
-        )     
-        # Train model
+            position_vocab_size=position_vocab_size,
+            position_embed_dim=position_embed_dim,
+            fixture_diff_vocab_size=fixture_diff_vocab_size,
+            fixture_diff_embed_dim=fixture_diff_embed_dim
+        )
+
         val_rmse = train_model(
             model,
-            X_train=X_train, 
-            y_train=y_train,
-            X_val=X_val, 
-            y_val=y_val, 
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
             player_ids_train=player_ids_train,
             player_ids_val=player_ids_val,
+            pos_ids_train=pos_ids_train,
+            pos_ids_val=pos_ids_val,
+            fixdiff_ids_train=fixdiff_ids_train,
+            fixdiff_ids_val=fixdiff_ids_val,
             learning_rate=params['learning_rate'],
             weight_decay=params['weight_decay'],
             batch_size=params['batch_size'],
