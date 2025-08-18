@@ -162,8 +162,8 @@ def train_model(
 
         scheduler.step()
         
-        if avg_val_performance < best_performance:
-            best_performance = avg_val_performance
+        if avg_mae_loss < best_performance:
+            best_performance = avg_mae_loss
             if verbose >= 2:
                 model_data = {
                     'model_state_dict': model.state_dict(),
@@ -172,7 +172,7 @@ def train_model(
                     'lstm_layers': int(model.lstm_layers),
                     'dropout': float(model.dropout)}
                 torch.save(model_data, f"best_model.pth")
-                print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
+                print(f"Best model saved at epoch {epoch+1} with MAE: {best_performance:.4f}")
     return best_performance
 
 def hyperparameter_tuning(
