@@ -77,7 +77,8 @@ def train_model(
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=epochs, power=0.9)
-    criterion = torch.nn.MSELoss() 
+    criterion = torch.nn.HuberLoss()
+    mse = torch.nn.MSELoss() 
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
 
@@ -147,7 +148,7 @@ def train_model(
                 output = forward_model(X_batch_numeric, X_batch_static, pos_batch, fixd_batch)
                 if transform:
                     output = torch.expm1(output)
-                batch_mse = criterion(output, y_batch)              # mean over batch
+                batch_mse = mse(output, y_batch)              # mean over batch
                 batch_mae = mae(output, y_batch)
 
                 bs = X_batch_numeric.size(0)

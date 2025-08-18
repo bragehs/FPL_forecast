@@ -627,14 +627,14 @@ def main():
     test = data[data["season_x"].isin(test_seasons)]
 
     train, scalers, encoders = normalize_and_encode(train, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home"], metadata_features=meta_data, fit=True)
+                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=True)
                                 #this is confusing, binary features means nothing happens and these columns are already ready
     
     val = normalize_and_encode(val, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
+                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
     test = normalize_and_encode(test, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
+                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
     
     pickle.dump(scalers, open(os.path.join(base_path, "processed_data", "scalers.pkl"), "wb"))
