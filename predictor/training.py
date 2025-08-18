@@ -2,20 +2,19 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from model import AdvancedLSTM
+from model import FPLSequenceModel
 import os
 import numpy as np
 import random
     
 
 class Seq2OutputDataset(Dataset):
-    def __init__(self, X, y,
-                 player_ids=None,
+    def __init__(self, X_numeric, X_static, y,
                  pos_ids=None,
                  fixdiff_ids=None,
                  transform=False):
-        self.X = X
-        self.player_ids = player_ids          # (N,)
+        self.X_numeric = X_numeric
+        self.X_static = X_static
         self.pos_ids = pos_ids                # (N, seq_len)
         self.fixdiff_ids = fixdiff_ids        # (N, seq_len)
         if transform:
@@ -24,27 +23,27 @@ class Seq2OutputDataset(Dataset):
             self.y = y
 
     def __len__(self):
-        return len(self.X)
+        return len(self.X_numeric)
 
     def __getitem__(self, idx):
-        x = self.X[idx]
+        x_numeric = self.X_numeric[idx]
+        x_static = self.X_static[idx]
         y = self.y[idx]
-        pid = self.player_ids[idx] if self.player_ids is not None else None
         pos = self.pos_ids[idx] if self.pos_ids is not None else None
         fixd = self.fixdiff_ids[idx] if self.fixdiff_ids is not None else None
         # Return only what exists (keeps compatibility)
-        if pid is None and pos is None and fixd is None:
-            return x, y
-        return x, y, pid, pos, fixd
+        if pos is None and fixd is None:
+            return x_numeric, x_static, y
+        return x_numeric, x_static, y, pos, fixd
 
 def train_model(
         model,
-        X_train,
+        X_train_numeric,
+        X_train_static,
         y_train,
-        X_val,
+        X_val_numeric,
+        X_val_static,
         y_val,
-        player_ids_train=None,
-        player_ids_val=None,
         pos_ids_train=None,
         pos_ids_val=None,
         fixdiff_ids_train=None,
@@ -61,15 +60,13 @@ def train_model(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_dataset = Seq2OutputDataset(
-        X_train, y_train,
-        player_ids=player_ids_train,
+        X_train_numeric, X_train_static, y_train,
         pos_ids=pos_ids_train,
         fixdiff_ids=fixdiff_ids_train,
         transform=transform
     )
     val_dataset = Seq2OutputDataset(
-        X_val, y_val,
-        player_ids=player_ids_val,
+        X_val_numeric, X_val_static, y_val,
         pos_ids=pos_ids_val,
         fixdiff_ids=fixdiff_ids_val,
         transform=transform
@@ -84,19 +81,17 @@ def train_model(
     mae = torch.nn.L1Loss()
     best_performance = float('inf')
 
-    def forward_model(x, pid=None, pos=None, fixd=None):
+    def forward_model(x_numeric, x_static, pos=None, fixd=None):
         kwargs = {}
-        if getattr(model, 'use_player', False) and pid is not None:
-            kwargs['player_ids'] = pid
         if getattr(model, 'use_position', False) and pos is not None:
             kwargs['pos_ids'] = pos
         if getattr(model, 'use_fixdiff', False) and fixd is not None:
             kwargs['fixdiff_ids'] = fixd
         try:
-            return model(x, **kwargs) if kwargs else model(x)
+            return model(x_numeric, x_static, **kwargs) if kwargs else model(x_numeric, x_static)
         except TypeError:
-            return model(x)
-        
+            return model(x_numeric, x_static)
+
     # --- Training loop ---
     for epoch in range(epochs):
         model.train()
@@ -107,22 +102,22 @@ def train_model(
             progress = train_loader
         for batch in progress:
             if len(batch) == 2:
-                X_batch, y_batch = batch
-                pid_batch = pos_batch = fixd_batch = None
+                X_batch_numeric, X_batch_static, y_batch = batch
+                pos_batch = fixd_batch = None
             else:
-                X_batch, y_batch, pid_batch, pos_batch, fixd_batch = batch
-            X_batch = X_batch.to(device)
+                X_batch_numeric, X_batch_static, y_batch, pos_batch, fixd_batch = batch
+            X_batch_numeric = X_batch_numeric.to(device)
+            X_batch_static = X_batch_static.to(device)
             y_batch = y_batch.to(device)
-            if pid_batch is not None: pid_batch = pid_batch.to(device)
             if pos_batch is not None: pos_batch = pos_batch.to(device)
             if fixd_batch is not None: fixd_batch = fixd_batch.to(device)
 
             optimizer.zero_grad()
-            output = forward_model(X_batch, pid_batch, pos_batch, fixd_batch)
+            output = forward_model(X_batch_numeric, X_batch_static, pos_batch, fixd_batch)
             loss = criterion(output, y_batch)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * X_batch.size(0)
+            epoch_loss += loss.item() * X_batch_numeric.size(0)
             if verbose >= 2 and hasattr(progress, 'set_postfix'):
                 progress.set_postfix(loss=f"{loss.item():.4f}", lr=optimizer.param_groups[0]['lr'])
         avg_loss = epoch_loss / len(train_loader.dataset)
@@ -139,23 +134,23 @@ def train_model(
         with torch.no_grad():
             for batch in val_loader:
                 if len(batch) == 2:
-                    X_batch, y_batch = batch
-                    pid_batch = pos_batch = fixd_batch = None
+                    X_batch_numeric, X_batch_static, y_batch = batch
+                    pos_batch = fixd_batch = None
                 else:
-                    X_batch, y_batch, pid_batch, pos_batch, fixd_batch = batch
-                X_batch = X_batch.to(device)
+                    X_batch_numeric, X_batch_static, y_batch, pos_batch, fixd_batch = batch
+                X_batch_numeric = X_batch_numeric.to(device)
+                X_batch_static = X_batch_static.to(device)
                 y_batch = y_batch.to(device)
-                if pid_batch is not None: pid_batch = pid_batch.to(device)
                 if pos_batch is not None: pos_batch = pos_batch.to(device)
                 if fixd_batch is not None: fixd_batch = fixd_batch.to(device)
 
-                output = forward_model(X_batch, pid_batch, pos_batch, fixd_batch)
+                output = forward_model(X_batch_numeric, X_batch_static, pos_batch, fixd_batch)
                 if transform:
                     output = torch.expm1(output)
                 batch_mse = criterion(output, y_batch)              # mean over batch
                 batch_mae = mae(output, y_batch)
 
-                bs = X_batch.size(0)
+                bs = X_batch_numeric.size(0)
                 sse += batch_mse.item() * bs                        # MSE * batch_size = SSE
                 mae_sum += batch_mae.item() * bs
         avg_val_performance = (sse / len(val_loader.dataset)) ** 0.5
@@ -173,19 +168,17 @@ def train_model(
                     'model_state_dict': model.state_dict(),
                     'best_performance': float(best_performance),
                     'hidden_dim': int(model.hidden_dim),
-                    'num_fc_layers': int(model.num_fc_layers),
-                    'num_layers': int(model.num_layers)}
+                    'lstm_layers': int(model.lstm_layers),
+                    'dropout': float(model.dropout)}
                 torch.save(model_data, f"best_model.pth")
                 print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
 def hyperparameter_tuning(
-        X_train, y_train,
-        X_val, y_val,
-        player_ids_train=None, player_ids_val=None,
+        X_train_numeric, X_train_static, y_train,
+        X_val_numeric, X_val_static, y_val,
         pos_ids_train=None, pos_ids_val=None,
         fixdiff_ids_train=None, fixdiff_ids_val=None,
-        player_vocab_size=None, player_embed_dim=None, unknown_player_index=None,
         position_vocab_size=None, position_embed_dim=None,
         fixture_diff_vocab_size=None, fixture_diff_embed_dim=None,
         transform=False,
@@ -197,9 +190,8 @@ def hyperparameter_tuning(
         'learning_rate': [1e-4, 5e-4, 1e-3, 5e-3, 1e-2],
         'hidden_dim': [64, 96, 128, 192, 256],
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
-        'num_layers': [1, 2, 3, 4],
+        'lstm_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'num_fc_layers': [1, 2, 3, 4],
         'batch_size': [32, 64, 128, 256]
     }
     
@@ -215,9 +207,8 @@ def hyperparameter_tuning(
             'learning_rate': random.choice(param_ranges['learning_rate']),
             'hidden_dim': random.choice(param_ranges['hidden_dim']),
             'weight_decay': random.choice(param_ranges['weight_decay']),
-            'num_layers': random.choice(param_ranges['num_layers']),
+            'lstm_layers': random.choice(param_ranges['lstm_layers']),
             'dropout': random.choice(param_ranges['dropout']),
-            'num_fc_layers': random.choice(param_ranges['num_fc_layers']),
             'batch_size': random.choice(param_ranges['batch_size']),
         }
         
@@ -225,28 +216,26 @@ def hyperparameter_tuning(
         print(f"Params: {params}")
         
         # Create model with sampled parameters
-        model = AdvancedLSTM(
-            input_dim=X_train.shape[-1],
+        model = FPLSequenceModel(
+            numeric_seq_dim=X_train_numeric.shape[-1],
+            static_dim=X_train_static.shape[-1],
             hidden_dim=params['hidden_dim'],
-            output_dim=1,
-            num_layers=params['num_layers'],
+            lstm_layers=params['lstm_layers'],
             dropout=params['dropout'],
-            num_fc_layers=params['num_fc_layers'],
-            player_vocab_size=player_vocab_size,
-            player_embed_dim=player_embed_dim,
-            unknown_player_index=unknown_player_index,
             position_vocab_size=position_vocab_size,
             position_embed_dim=position_embed_dim,
             fixture_diff_vocab_size=fixture_diff_vocab_size,
-            fixture_diff_embed_dim=fixture_diff_embed_dim
+            fixture_diff_embed_dim=fixture_diff_embed_dim,
         )
 
         val_rmse = train_model(
             model,
-            X_train=X_train, y_train=y_train,
-            X_val=X_val, y_val=y_val,
-            player_ids_train=player_ids_train,
-            player_ids_val=player_ids_val,
+            X_train_numeric=X_train_numeric,
+            X_train_static=X_train_static,
+            y_train=y_train,
+            X_val_numeric=X_val_numeric,
+            X_val_static=X_val_static,
+            y_val=y_val,
             pos_ids_train=pos_ids_train,
             pos_ids_val=pos_ids_val,
             fixdiff_ids_train=fixdiff_ids_train,

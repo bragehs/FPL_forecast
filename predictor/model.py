@@ -1,158 +1,184 @@
 import torch
 import torch.nn as nn
+import math
+from typing import Optional
 
-class LSTMEncoderOnly(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim=1, num_layers=1, dropout=0.0):
+class LockedDropout(nn.Module):
+    def __init__(self, p: float):
         super().__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_dim, output_dim)
-
+        self.p = p
     def forward(self, x):
-        # x: (batch, seq_len, input_dim)
-        _, (hidden, _) = self.lstm(x)  # hidden: (num_layers, batch, hidden_dim)
-        hidden_last = hidden[-1]       # (batch, hidden_dim)
-        out = self.fc(hidden_last)     # (batch, output_dim)
-        return out
-    
+        if not self.training or self.p == 0:
+            return x
+        # x: (B,T,F)
+        mask = x.new_empty(x.size(0), 1, x.size(2)).bernoulli_(1 - self.p).div_(1 - self.p)
+        return x * mask
 
-# ...existing code...
-class AdvancedLSTM(nn.Module):
-    def __init__(self,
-                 input_dim,
-                 hidden_dim,
-                 output_dim=1,
-                 num_layers=3,
-                 dropout=0.3,
-                 num_fc_layers=2,
-                 position_vocab_size=None,
-                 position_embed_dim=4,
-                 player_vocab_size=None,
-                 player_embed_dim=16,
-                 unknown_player_index=None,
-                 fixture_diff_vocab_size=None,
-                 fixture_diff_embed_dim=4):
+class AttentionPool(nn.Module):
+    def __init__(self, dim, hidden=64):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.num_fc_layers = num_fc_layers
+        self.proj = nn.Sequential(
+            nn.Linear(dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 1)
+        )
+    def forward(self, x, mask=None):
+        # x: (B,T,D)
+        scores = self.proj(x).squeeze(-1)  # (B,T)
+        if mask is not None:
+            scores = scores.masked_fill(~mask, -1e9)
+        w = torch.softmax(scores, dim=-1).unsqueeze(-1)  # (B,T,1)
+        return (x * w).sum(dim=1), w.squeeze(-1)
+
+class FPLSequenceModel(nn.Module):
+    def __init__(
+        self,
+        numeric_seq_dim,
+        static_dim,
+        hidden_dim=128,
+        lstm_layers=2,
+        dropout=0.3,
+        position_vocab_size=None,
+        position_embed_dim=6,
+        fixture_diff_vocab_size=None,
+        fixture_diff_embed_dim=4,
+        multitask=False
+    ):
+        super().__init__()
         self.use_position = position_vocab_size is not None
-        self.use_player = player_vocab_size is not None
         self.use_fixdiff = fixture_diff_vocab_size is not None
+        emb_dims = 0
 
         if self.use_position:
             self.position_embedding = nn.Embedding(position_vocab_size, position_embed_dim, padding_idx=0)
-        else:
-            position_embed_dim = 0
-
-        if self.use_player:
-            if unknown_player_index is None:
-                unknown_player_index = player_vocab_size - 1
-            self.unknown_player_index = unknown_player_index
-            self.player_embedding = nn.Embedding(player_vocab_size, player_embed_dim)
-        else:
-            player_embed_dim = 0
-            self.unknown_player_index = None
-
+            emb_dims += position_embed_dim
         if self.use_fixdiff:
             self.fixdiff_embedding = nn.Embedding(fixture_diff_vocab_size, fixture_diff_embed_dim, padding_idx=0)
-        else:
-            fixture_diff_embed_dim = 0
+            emb_dims += fixture_diff_embed_dim
 
-        total_input_dim = input_dim + position_embed_dim + player_embed_dim + fixture_diff_embed_dim
+        self.embedding_dropout = nn.Dropout(0.1)
 
-        self.lstm = nn.LSTM(total_input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.dropout = nn.Dropout(dropout)
-        self.relu = nn.ReLU()
+        lstm_input_dim = numeric_seq_dim + emb_dims
 
-        fc_layers = []
-        cur = hidden_dim
-        for i in range(num_fc_layers - 1):
-            nxt = max(output_dim, cur // 2)
-            fc_layers += [nn.Linear(cur, nxt), nn.BatchNorm1d(nxt), nn.ReLU(), nn.Dropout(dropout)]
-            cur = nxt
-        fc_layers.append(nn.Linear(cur, output_dim))
-        self.head = nn.Sequential(*fc_layers)
+        self.lstm_layers = lstm_layers
+        self.hidden_dim = hidden_dim
+        self.dropout = dropout
 
-    def forward(self, x_numeric, pos_ids=None, player_ids=None, fixdiff_ids=None):
-        # x_numeric: (B,T,feat)
-        B, T, _ = x_numeric.shape
-        parts = [x_numeric]
+        self.locked_dropout_in = LockedDropout(dropout)
+        self.lstm = nn.LSTM(
+            lstm_input_dim,
+            hidden_dim,
+            num_layers=lstm_layers,
+            batch_first=True,
+            dropout=dropout if lstm_layers > 1 else 0
+        )
+        self.locked_dropout_out = LockedDropout(dropout)
+        self.attn_pool = AttentionPool(hidden_dim)
+        self.out_dropout = nn.Dropout(dropout * 0.5)
 
+        fusion_dim = hidden_dim * 3 + static_dim  # attn + mean + max + static
+
+        self.head_points = nn.Sequential(
+            nn.Linear(fusion_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        self.multitask = multitask
+        if multitask:
+            self.head_minutes = nn.Linear(fusion_dim, 1)
+            self.head_xgi = nn.Linear(fusion_dim, 1)
+
+    def forward(
+        self,
+        seq_numeric,         # (B,T,Fn)
+        static_numeric,      # (B,Fs)
+        pos_ids=None,
+        fixdiff_ids=None,
+        mask: Optional[torch.Tensor]=None  # (B,T) boolean
+    ):
+        B, T, _ = seq_numeric.shape
+        parts = [seq_numeric]
         if self.use_position:
-            if pos_ids is None:
-                raise ValueError("pos_ids required")
-            # pos_ids: (B,T) or (B,) -> ensure (B,T)
             if pos_ids.dim() == 1:
                 pos_ids = pos_ids.unsqueeze(1).expand(-1, T)
-            pos_emb = self.position_embedding(pos_ids)  # (B,T,Ep)
-            parts.append(pos_emb)
-
-        if self.use_player:
-            if player_ids is None:
-                raise ValueError("player_ids required")
-            pid = player_ids.clone()
-            pid[(pid < 0) | (pid >= self.player_embedding.num_embeddings)] = self.unknown_player_index
-            pl_emb = self.player_embedding(pid).unsqueeze(1).expand(-1, T, -1)
-            parts.append(pl_emb)
-
+            parts.append(self.position_embedding(pos_ids))
         if self.use_fixdiff:
-            if fixdiff_ids is None:
-                raise ValueError("fixdiff_ids required")
-            fixdiff_emb = self.fixdiff_embedding(fixdiff_ids)  # (B,T,Ef)
-            parts.append(fixdiff_emb)
-
+            parts.append(self.fixdiff_embedding(fixdiff_ids))
         x = torch.cat(parts, dim=-1)
-        _, (h, _) = self.lstm(x)
-        h_last = h[-1]
-        return self.head(h_last)
+        x = self.embedding_dropout(x)
+        x = self.locked_dropout_in(x)
+        out, _ = self.lstm(x)
+        out = self.locked_dropout_out(out)
 
+        if mask is not None:
+            # ensure mask shape (B,T)
+            # Replace masked positions with large negative for pooling if needed
+            pass
+
+        attn_vec, _ = self.attn_pool(out, mask)
+        mean_pool = out.mean(dim=1)
+        max_pool, _ = out.max(dim=1)
+        fused = torch.cat([attn_vec, mean_pool, max_pool, static_numeric], dim=-1)
+        fused = self.out_dropout(fused)
+        points = self.head_points(fused)
+
+        if self.multitask:
+            minutes = self.head_minutes(fused)
+            xgi = self.head_xgi(fused)
+            return points, minutes, xgi
+        return points
 
 if __name__ == "__main__":
-    #do some testing
-    input_tensor = torch.randn(32, 5, 26)  # batch_size=32, seq_len=5, feature_dim=25
-    target_tensor = torch.randn(32, 1)  # batch_size=32, output_len=3
+    B = 32
+    T = 5
+    seq_feat_dim = 26          # per-GW numeric features
+    static_feat_dim = 8        # example: season aggregates, team strength, etc.
+    #SEPARATES INTO STATIC AND PER-GW FEATURES
+    # Fake dataß
+    seq_numeric = torch.randn(B, T, seq_feat_dim)
+    static_numeric = torch.randn(B, static_feat_dim)
 
-
-    model = LSTMEncoderOnly(input_dim=26, hidden_dim=128, output_dim=1, num_layers=2, dropout=0.2)
-    print("Model Architecture:")
-    print(model.lstm.dropout)
-    training_output = model(input_tensor)
-    print("output shape:", training_output.shape)  
-
-    num_params = sum(p.numel() for p in model.parameters())
-    print(f"Number of parameters in model: {num_params}")
-
-    # Advanced model WITHOUT embeddings (backward compatible)
-    adv_model_plain = AdvancedLSTM(input_dim=26, hidden_dim=128, output_dim=1, num_layers=3, dropout=0.3, num_fc_layers=3)
-    print("Advanced (no embeddings) output shape:", adv_model_plain(input_tensor).shape)
-
-    # Advanced model WITH position & player embeddings
-    position_vocab_size = 4          # e.g., GK, DEF, MID, FWD + variants
-    player_vocab_size = 1000 + 1     # include +1 for <unk>
-    unknown_idx = player_vocab_size - 1
-
-    adv_model_embed = AdvancedLSTM(
-        input_dim=26,
+    # 1. Plain model (no embeddings, single-task)
+    model_plain = FPLSequenceModel(
+        numeric_seq_dim=seq_feat_dim,
+        static_dim=static_feat_dim,
         hidden_dim=128,
-        output_dim=1,
-        num_layers=3,
+        lstm_layers=2,
+        dropout=0.3
+    )
+    out_plain = model_plain(seq_numeric, static_numeric)
+    print("Plain output shape:", out_plain.shape)
+    print(out_plain)
+    # 2. With embeddings + multitask
+    position_vocab_size = 5          # e.g. 0 pad, then GK/DEF/MID/FWD
+    fixture_diff_vocab_size = 8      # example buckets of fixture difficulty
+
+    pos_ids = torch.randint(1, position_vocab_size, (B,))           # (B,) will be expanded
+    fixdiff_ids = torch.randint(0, fixture_diff_vocab_size, (B, T)) # (B,T)
+
+    model_embed = FPLSequenceModel(
+        numeric_seq_dim=seq_feat_dim,
+        static_dim=static_feat_dim,
+        hidden_dim=128,
+        lstm_layers=2,
         dropout=0.3,
-        num_fc_layers=3,
         position_vocab_size=position_vocab_size,
         position_embed_dim=6,
-        player_vocab_size=player_vocab_size,
-        player_embed_dim=24,
-        unknown_player_index=unknown_idx
+        fixture_diff_vocab_size=fixture_diff_vocab_size,
+        fixture_diff_embed_dim=4,
+        multitask=True
     )
 
-    # Fake ids
-    pos_ids = torch.randint(0, position_vocab_size, (32, 5))          # (batch, seq_len)
-    player_ids = torch.randint(0, player_vocab_size - 1, (32,))    
-    print(pos_ids.shape, player_ids.shape)   # exclude unknown for most
-    player_ids[0] = 50000  # OOV example -> will be mapped to unknown
+    # Optional mask (all valid here)
+    mask = torch.ones(B, T, dtype=torch.bool)
 
-    output_with_emb = adv_model_embed(input_tensor, pos_ids=pos_ids, player_ids=player_ids)
-    print("Advanced (with embeddings) output shape:", output_with_emb.shape)
-    num_params_embed = sum(p.numel() for p in adv_model_embed.parameters())
-    print(f"Number of parameters in advanced model (with embeddings): {num_params_embed}")
+    points, minutes, xgi = model_embed(
+        seq_numeric=seq_numeric,
+        static_numeric=static_numeric,
+        pos_ids=pos_ids,
+        fixdiff_ids=fixdiff_ids,
+        mask=mask
+    )
+    print("Multitask shapes:", points.shape, minutes.shape, xgi.shape)
