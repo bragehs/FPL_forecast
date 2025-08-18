@@ -125,9 +125,9 @@ def train_model(
 
         if verbose >= 2:
             if transform:
-                print(f"Epoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
+                print(f"\nEpoch {epoch+1} Training MSE (log): {avg_loss:.4f}")
             else:
-                print(f"Epoch {epoch+1} Training MSE: {avg_loss:.4f}")
+                print(f"\nEpoch {epoch+1} Training MSE: {avg_loss:.4f}")
         # --- Validation loop ---
         model.eval()
         sse = 0.0          # sum of squared errors
