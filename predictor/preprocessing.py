@@ -449,7 +449,7 @@ def main():
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "total_points"]]
-    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
+    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes', 'position_encoded']
 
     seasons = np.unique(data["season_x"])
     number_of_training_seasons = len(seasons) - 2
@@ -483,10 +483,10 @@ def main():
     #remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
     pickle.dump(lagged_features, open(os.path.join(base_path, "processed_data", "lagged_features.pkl"), "wb"))
 
-    position_columns = [col for col in train.columns if col.startswith('position_encoded')]
+    position_columns = [col for col in train.columns if col.startswith('position_encoded_')]
     static_features.extend(position_columns)
     lagged_features.extend(position_columns)
-    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes']
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes', 'position_encoded']
     needed_features = extra_needed + lagged_features
 
     for col in [col for col in needed_features if col not in ['season_x', 'name']]:

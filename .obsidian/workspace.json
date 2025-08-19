@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "PLAN.md",
+                "file": "README.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "PLAN"
+              "title": "README"
             }
           }
         ]
@@ -160,6 +160,7 @@
   },
   "left-ribbon": {
     "hiddenItems": {
+      "bases:Create new base": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
@@ -170,8 +171,8 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
-    "README.md",
     "PLAN.md",
+    "README.md",
     "predictor/best_model.pth",
     "backend/predictor/best_model.pth",
     "backend/predictor/training.py",
