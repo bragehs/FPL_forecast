@@ -73,7 +73,7 @@ def train_model(
 
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=epochs, power=0.9)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, min_lr=1e-6)
     criterion = CustomLoss(alpha=alpha)
     mse = torch.nn.MSELoss()
     mae = torch.nn.L1Loss()
