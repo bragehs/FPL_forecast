@@ -208,7 +208,6 @@ def add_fixture_difficulty_to_dataframe(df, backend_root):
 def add_new_features(df):
     df["team_score"] = df.apply(lambda row: row["team_h_score"] if row["was_home"] else row["team_a_score"], axis=1)
     df["opponent_score"] = df.apply(lambda row: row["team_a_score"] if row["was_home"] else row["team_h_score"], axis=1)
-    df['season_progress'] = df['GW'] / df['GW'].max()
     return df
 
 def add_future_lagged_features(df, lagged_features=['was_home', 'fixture_difficulty']):
@@ -325,158 +324,7 @@ def player_lag_features(gw_df, features, lags):
     return out_df, lagged_features
 
 
-def create_sequences_train(df, past_sequences=5, future_sequences=3, meta_data=[]):
-    """
-    Create sequences of data for each player with mapping information.
-    aggressive padding strategy:
-        - Creates multiple padded versions for early gameweeks
-        - Adds random padding to later gameweeks to simulate missing data scenarios
-        - Helps model learn to handle incomplete historical information
-    
-    Returns:
-        X_tensor: Input sequences
-        y_tensor: Target sequences  
-        mapping_df: DataFrame with player/GW info for each sequence
-    """
-    feature_cols = sorted([col for col in df.columns if col not in meta_data])
-    X_seq, y_seq = [], []
-    mapping_info = []
-    
-    num_features = len(feature_cols)
-    for player_id, stats in df.groupby(['element', 'season_x']):
-        group = stats.sort_values('GW').reset_index(drop=True)
-        
-        # MISSING: Normal sequence creation for players with sufficient history
-        for i in range(past_sequences, len(group) - future_sequences + 1):
-            target_start_idx = i
-            
-            if target_start_idx + future_sequences - 1 >= len(group):
-                continue
-            
-            # Take normal historical data (no padding)
-            sequence_data = group.iloc[i + 1 - past_sequences:i + 1][feature_cols].values
-            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-            
-            if len(target) != future_sequences:
-                continue
-            
-            X_seq.append(sequence_data)
-            y_seq.append(target)
-
-            prediction_gw = group.iloc[target_start_idx]['GW']
-            mapping_info.append({
-                    'sequence_idx': len(X_seq) - 1,
-                    'element': player_id[0],
-                    'season_x': player_id[1],
-                    'name': group.iloc[target_start_idx]['name'],
-                    'prediction_gw': prediction_gw,
-                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                    'padding_used': 0,
-                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                    'sequence_type': f'artificial_padding_{0}'
-                })
-
-    for player_id, stats in df.groupby(['element', 'season_x']):
-        group = stats.sort_values('GW').reset_index(drop=True)
-        # Add sequences with artificial padding for mid-season scenarios
-        # This simulates situations where we have limited historical data due to transfers, injuries, etc.
-        
-        for i in range(past_sequences, min(len(group) - future_sequences + 1, 20)):  # Limit to first 20 GWs
-            target_start_idx = i
-            
-            if target_start_idx + future_sequences - 1 >= len(group):
-                continue
-            
-            # Create sequences with different amounts of artificial padding
-            for padding_amount in [1, 2, 3]:  # Add 1, 2, or 3 steps of padding
-                if i + 1 - padding_amount <= 0:
-                    continue
-                
-                # Take less historical data and pad the beginning
-                actual_history_length = past_sequences - padding_amount
-                actual_data = group.iloc[i + 1 - actual_history_length:i + 1][feature_cols].values
-                
-                # Create padded sequence
-                padded_sequence = np.zeros((past_sequences, num_features))
-                padded_sequence[padding_amount:] = actual_data
-                
-                # Get target values
-                target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-                
-                if len(target) != future_sequences:
-                    continue
-                
-                X_seq.append(padded_sequence)
-                y_seq.append(target)
-                
-                # Store mapping information
-                prediction_gw = group.iloc[target_start_idx]['GW']
-                mapping_info.append({
-                    'sequence_idx': len(X_seq) - 1,
-                    'element': player_id[0],
-                    'season_x': player_id[1],
-                    'name': group.iloc[target_start_idx]['name'],
-                    'prediction_gw': prediction_gw,
-                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                    'padding_used': padding_amount,
-                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                    'sequence_type': f'artificial_padding_{padding_amount}'
-                })
-        
-        # Add sequences simulating "new player" scenarios (heavy padding)
-        # Take a few mid-season predictions and treat them as if the player just started
-        for i in [10, 15, 20, 25]:  # Sample some mid-season gameweeks
-            if i >= len(group) - future_sequences + 1:
-                continue
-            
-            target_start_idx = i
-            if target_start_idx + future_sequences - 1 >= len(group):
-                continue
-            
-            # Create heavily padded sequences (simulating new players)
-            for simulated_history in [1, 2]:  # Simulate having only 1-2 games of history
-                actual_data = group.iloc[i + 1 - simulated_history:i + 1][feature_cols].values
-                padding_needed = past_sequences - simulated_history
-                
-                padded_sequence = np.zeros((past_sequences, num_features))
-                padded_sequence[padding_needed:] = actual_data
-                
-                target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-                
-                if len(target) != future_sequences:
-                    continue
-                
-                X_seq.append(padded_sequence)
-                y_seq.append(target)
-                
-                prediction_gw = group.iloc[target_start_idx]['GW']
-                mapping_info.append({
-                    'sequence_idx': len(X_seq) - 1,
-                    'element': player_id[0],
-                    'season_x': player_id[1],
-                    'name': group.iloc[target_start_idx]['name'],
-                    'prediction_gw': prediction_gw,
-                    'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
-                    'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                    'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
-                    'padding_used': padding_needed,
-                    'position_encoded': group.iloc[target_start_idx]['position_encoded'] if 'position_encoded' in group.columns else None,
-                    'sequence_type': f'new_player_sim_{simulated_history}'
-                })
-    
-    X_tensor = torch.tensor(np.array(X_seq), dtype=torch.float32)
-    y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
-    mapping_df = pd.DataFrame(mapping_info)
-    
-    return X_tensor, y_tensor, mapping_df
-
-
-#should really have train and test sequences in the same function
-def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[], static_features=[]):
+def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], static_features=[]):
     """
     Create sequences of data for each player with mapping information.
     For early gameweeks, pad with zeros:
@@ -492,10 +340,8 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
         mapping_df: DataFrame with player/GW info for each sequence
     """
     feature_cols = sorted([col for col in df.columns if col not in meta_data + static_features])
-    X_seq_gw, X_seq_static, y_seq = [], [], []
+    X_seq_gw, X_seq_static, y_seq, minutes_seq = [], [], [], []
     mapping_info = []
-    pos_ids_seq = []
-    fixdiff_ids_seq = []
     print("order of features:", feature_cols)
     print("order of static features:", static_features)
 
@@ -519,7 +365,6 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
                 history_slice = group.iloc[i+1 - past_sequences:i+1]
                 sequence_data_gw = history_slice[feature_cols].values
                 static_data = history_slice.iloc[-1][static_features].values
-                fixture_diff_window = history_slice['lagged_fixture_difficulty'].values
             else:
                 # We need padding for early gameweeks
                 actual_history = group.iloc[0:i+1]
@@ -530,11 +375,9 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
 
                 static_data = actual_history.iloc[-1][static_features].values 
 
-                fixture_diff_window = np.zeros(past_sequences, dtype=int)
-                fixture_diff_window[padding_needed:] = actual_history['lagged_fixture_difficulty'].astype(int).values
-
             # Get target values
             target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
+            minutes = group.iloc[target_start_idx:target_start_idx + future_sequences]['minutes'].values
 
             if len(target) != future_sequences:
                 continue
@@ -542,11 +385,8 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
             X_seq_gw.append(sequence_data_gw)
             X_seq_static.append(static_data)
             y_seq.append(target)
+            minutes_seq.append(minutes)
 
-            # Position id (single value) repeated across window
-            pos_id = int(group.iloc[target_start_idx]['position_encoded']) if 'position_encoded' in group.columns else 0
-            pos_ids_seq.append(np.full(past_sequences, pos_id, dtype=int))
-            fixdiff_ids_seq.append(fixture_diff_window)
             
             # Store mapping information for the prediction gameweek
             prediction_gw = group.iloc[target_start_idx]['GW']
@@ -568,12 +408,10 @@ def create_sequences_test(df, past_sequences=5, future_sequences=3, meta_data=[]
     X_tensor = torch.tensor(np.array(X_seq_gw), dtype=torch.float32)
     X_static_tensor = torch.from_numpy(np.stack([np.asarray(a, dtype=np.float32) for a in X_seq_static]))
     y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
-
-    pos_ids_tensor = torch.tensor(np.array(pos_ids_seq), dtype=torch.long)          # (N, seq_len)
-    fixdiff_ids_tensor = torch.tensor(np.array(fixdiff_ids_seq), dtype=torch.long)  # (N, seq_len)
-
+    minutes_tensor = torch.tensor(np.array(minutes_seq), dtype=torch.float32)
     mapping_df = pd.DataFrame(mapping_info)
-    return X_tensor, X_static_tensor, y_tensor, mapping_df, pos_ids_tensor, fixdiff_ids_tensor
+
+    return X_tensor, X_static_tensor, y_tensor, minutes_tensor, mapping_df
 
 def main():
     base_path = os.getcwd() + '/predictor/'
@@ -607,11 +445,11 @@ def main():
 
     data = add_future_lagged_features(data)
     #include new lagged features
-    lagged_features.extend(["lagged_was_home", "season_progress"])
+    lagged_features.extend(["lagged_was_home", "lagged_fixture_difficulty"])
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "total_points"]]
-    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes', 'position_encoded', 'lagged_fixture_difficulty']
+    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes']
 
     seasons = np.unique(data["season_x"])
     number_of_training_seasons = len(seasons) - 2
@@ -626,15 +464,15 @@ def main():
     val = data[data["season_x"].isin(val_seasons)]
     test = data[data["season_x"].isin(test_seasons)]
 
-    train, scalers, encoders = normalize_and_encode(train, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=True)
+    train, scalers, encoders = normalize_and_encode(train, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=True)
                                 #this is confusing, binary features means nothing happens and these columns are already ready
-    
-    val = normalize_and_encode(val, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=False,
+
+    val = normalize_and_encode(val, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
-    test = normalize_and_encode(test, min_max_features=continuous_features, categorical_features=[], target="total_points",
-                                binary_features=["was_home", "season_progress"], metadata_features=meta_data, fit=False,
+    test = normalize_and_encode(test, min_max_features=continuous_features, categorical_features=["position_encoded"], target="total_points",
+                                binary_features=["was_home"], metadata_features=meta_data, fit=False,
                                 scalers=scalers, encoders=encoders)
     
     pickle.dump(scalers, open(os.path.join(base_path, "processed_data", "scalers.pkl"), "wb"))
@@ -643,9 +481,12 @@ def main():
 
     # Update lagged_features to only include remaining features
     #remaining_lagged_features = [col for col in lagged_features if col not in removed_features['removed_columns']]
-    pickle.dump(lagged_features, open(os.path.join(base_path, "processed_data", "remaining_lagged_features.pkl"), "wb"))
+    pickle.dump(lagged_features, open(os.path.join(base_path, "processed_data", "lagged_features.pkl"), "wb"))
 
-    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes', 'position_encoded', 'lagged_fixture_difficulty']
+    position_columns = [col for col in train.columns if col.startswith('position_encoded')]
+    static_features.extend(position_columns)
+    lagged_features.extend(position_columns)
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes']
     needed_features = extra_needed + lagged_features
 
     for col in [col for col in needed_features if col not in ['season_x', 'name']]:
@@ -662,30 +503,29 @@ def main():
     #test for NA values
     for df in [train, val, test]:
         print(df.isna().sum())
-    print(train["position_encoded"].unique())
 
-    X_train, X_static_train, y_train, train_mapping, pos_train, fixdiff_train = create_sequences_test(
+    X_train, X_static_train, y_train, minutes_train, train_mapping = create_sequences(
         train[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
         meta_data= extra_needed,
-        static_features=static_features
+        static_features=static_features,
     )
 
-    X_val, X_static_val, y_val, val_mapping, pos_val, fixdiff_val = create_sequences_test(
+    X_val, X_static_val, y_val, minutes_val, val_mapping = create_sequences(
         val[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
         meta_data= extra_needed,
-        static_features=static_features
+        static_features=static_features,
     )
 
-    X_test, X_static_test, y_test, test_mapping, pos_test, fixdiff_test = create_sequences_test(
+    X_test, X_static_test, y_test, minutes_test, test_mapping = create_sequences(
         test[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
         meta_data= extra_needed,
-        static_features=static_features
+        static_features=static_features,
     )
     #check for Nan again
     for tensor in [X_train, X_static_train, y_train]:
@@ -696,54 +536,20 @@ def main():
     torch.save(X_train, os.path.join(output_dir, "X_train.pt"))
     torch.save(X_static_train, os.path.join(output_dir, "X_static_train.pt"))
     torch.save(y_train, os.path.join(output_dir, "y_train.pt"))
+    torch.save(minutes_train, os.path.join(output_dir, "minutes_train.pt"))
     train_mapping.to_csv(os.path.join(output_dir, "train_mapping.csv"), index=False)
-    torch.save(pos_train, os.path.join(output_dir, "pos_train.pt"))
-    torch.save(fixdiff_train, os.path.join(output_dir, "fixdiff_train.pt"))
 
     torch.save(X_val, os.path.join(output_dir, "X_val.pt"))
     torch.save(X_static_val, os.path.join(output_dir, "X_static_val.pt"))
     torch.save(y_val, os.path.join(output_dir, "y_val.pt"))
+    torch.save(minutes_val, os.path.join(output_dir, "minutes_val.pt"))
     val_mapping.to_csv(os.path.join(output_dir, "val_mapping.csv"), index=False)
-    torch.save(pos_val, os.path.join(output_dir, "pos_val.pt"))
-    torch.save(fixdiff_val, os.path.join(output_dir, "fixdiff_val.pt"))
 
     torch.save(X_test, os.path.join(output_dir, "X_test.pt"))
     torch.save(X_static_test, os.path.join(output_dir, "X_static_test.pt"))
     torch.save(y_test, os.path.join(output_dir, "y_test.pt"))
+    torch.save(minutes_test, os.path.join(output_dir, "minutes_test.pt"))
     test_mapping.to_csv(os.path.join(output_dir, "test_mapping.csv"), index=False)
-    torch.save(pos_test, os.path.join(output_dir, "pos_test.pt"))
-    torch.save(fixdiff_test, os.path.join(output_dir, "fixdiff_test.pt"))
-
-    train_names = train_mapping['name'].astype(str).unique()
-    name_to_idx = {n: i for i, n in enumerate(sorted(train_names))}
-    unk_id = len(name_to_idx)
-    name_to_idx['<unk>'] = unk_id
-    idx_to_name = {v: k for k, v in name_to_idx.items()}
-
-    vocab_dir = os.path.join(output_dir, "vocab")
-    os.makedirs(vocab_dir, exist_ok=True)
-    with open(os.path.join(vocab_dir, "player_name_to_idx.json"), "w") as f:
-        json.dump(name_to_idx, f)
-    with open(os.path.join(vocab_dir, "idx_to_player_name.json"), "w") as f:
-        json.dump({str(k): v for k, v in idx_to_name.items()}, f)
-    with open(os.path.join(vocab_dir, "unk_id.txt"), "w") as f:
-        f.write(str(unk_id))
-
-
-    def map_player_ids(mapping_df):
-        mapping_df = mapping_df.sort_values('sequence_idx')
-        ids = mapping_df['name'].map(lambda x: name_to_idx.get(str(x), unk_id)).to_numpy()
-        assert (mapping_df['sequence_idx'].to_numpy() == np.arange(len(mapping_df))).all(), "sequence_idx not contiguous from 0"
-        return torch.tensor(ids, dtype=torch.long)
-
-    train_player_ids = map_player_ids(train_mapping)
-    val_player_ids = map_player_ids(val_mapping)
-    test_player_ids = map_player_ids(test_mapping)
-
-    torch.save(train_player_ids, os.path.join(output_dir, "train_player_ids.pt"))
-    torch.save(val_player_ids, os.path.join(output_dir, "val_player_ids.pt"))
-    torch.save(test_player_ids, os.path.join(output_dir, "test_player_ids.pt"))
-    print(f"Name vocab size (incl <unk>): {len(name_to_idx)}  unk_id={unk_id}")
 
 if __name__ == "__main__":
     main()

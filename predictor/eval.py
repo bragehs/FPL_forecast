@@ -93,7 +93,7 @@ def get_score(team_list, gw_df, sort_by='predicted'):
     return gw_score
 
 
-def season_performance_with_unlimited_transfers(y_test, predictions, remaining_lagged_features):
+def season_performance_with_unlimited_transfers(y_test, predictions):
     """
     Get the season performance of the team based on the predictions with unlimited transfers.
     Creates a completely new optimal team for each gameweek using that gameweek's predictions.
