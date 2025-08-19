@@ -159,11 +159,11 @@ def hyperparameter_tuning(
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
         'lstm_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'alpha': [0.3, 0.5, 0.7, 1.0],
+        'alpha': [0.0, 0.5, 1.0],
         'batch_size': [32, 64, 128, 256]
     }
     
-    best_rmse = float('inf')
+    best_mae = float('inf')
     best_params = None
     results = []
     
@@ -194,7 +194,7 @@ def hyperparameter_tuning(
             multitask=True,
         )
 
-        val_rmse = train_model(
+        val_mae = train_model(
             model,
             X_train_numeric=X_train_numeric,
             X_train_static=X_train_static,
@@ -212,20 +212,20 @@ def hyperparameter_tuning(
             num_workers=num_workers
         )
         
-        results.append({**params, 'rmse': val_rmse})
+        results.append({**params, 'mae': val_mae})
         
-        if val_rmse < best_rmse:
-            best_rmse = val_rmse
+        if val_mae < best_mae:
+            best_mae = val_mae
             best_params = params
-            print(f"New best RMSE: {best_rmse:.4f}")
+            print(f"New best MAE: {best_mae:.4f}")
     
     # Print top 5 results
     print(f"\nTop 5 hyperparameter combinations:")
-    results.sort(key=lambda x: x['rmse'])
+    results.sort(key=lambda x: x['mae'])
     for i, result in enumerate(results[:5]):
-        print(f"{i+1}. RMSE: {result['rmse']:.4f}, Params: {result}")
+        print(f"{i+1}. MAE: {result['mae']:.4f}, Params: {result}")
     
     print(f"\nBest hyperparameters: {best_params}")
-    print(f"Best RMSE: {best_rmse:.4f}")
-    
+    print(f"Best MAE: {best_mae:.4f}")
+
     return best_params
