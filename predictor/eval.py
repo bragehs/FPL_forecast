@@ -74,6 +74,7 @@ def make_predicted_table(y_test, y_pred):
     predictions_df = test_mapping.copy()
     predictions_df['actual'] = y_test
     predictions_df['predicted'] = y_pred
+    predictions_df['predicted'] = predictions_df['predicted'].where(predictions_df['minutes'] > 0, 0)
     predictions_df.rename(columns={'prediction_gw': 'GW'}, inplace=True)
 
 
@@ -92,7 +93,7 @@ def get_score(team_list, gw_df, sort_by='predicted'):
     return gw_score
 
 
-def season_performance_with_unlimited_transfers(y_test, predictions, remaining_lagged_features):
+def season_performance_with_unlimited_transfers(y_test, predictions):
     """
     Get the season performance of the team based on the predictions with unlimited transfers.
     Creates a completely new optimal team for each gameweek using that gameweek's predictions.
