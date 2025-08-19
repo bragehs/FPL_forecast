@@ -159,7 +159,7 @@ def hyperparameter_tuning(
         'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
         'lstm_layers': [1, 2, 3, 4],
         'dropout': [0.0, 0.1, 0.2, 0.3, 0.4],
-        'alpha': [0.0, 0.5, 1.0],
+        'alpha': [0.0, 0.3, 0.5, 0.7, 1.0],
         'batch_size': [32, 64, 128, 256]
     }
     
