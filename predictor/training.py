@@ -131,8 +131,8 @@ def train_model(
             print(f"Epoch {epoch+1} validation RMSE: {avg_val_performance:.4f}")
             print(f"Epoch {epoch+1} validation MAE: {avg_mae_loss:.4f}")
 
-        scheduler.step()
-        
+        scheduler.step(avg_mae_loss)
+
         if avg_mae_loss < best_performance:
             best_performance = avg_mae_loss
             if verbose >= 2:
