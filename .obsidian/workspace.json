@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "PLAN.md",
+                "file": "README.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "PLAN"
+              "title": "README"
             }
           }
         ]
@@ -171,6 +171,7 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "PLAN.md",
     "src/Prediction.tsx",
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js",
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.development.js",
@@ -181,11 +182,9 @@
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js",
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.native.production.js",
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.native.development.js",
-    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.development.js",
     "node_modules/use-sync-external-store/README.md",
     "node_modules/dequal/readme.md",
     "node_modules/swr/README.md",
-    "README.md",
-    "PLAN.md"
+    "README.md"
   ]
 }

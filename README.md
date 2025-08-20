@@ -27,7 +27,5 @@ This model is probably best used as a tool for a human to actually play FPL, ins
 
 
 I have also created an endpoint on huggingFace which returns a prediction for a player for the next gameweek when requesting with player id. 
-## TODO
 
-create a website where:
-- you can search for players and ask the model to give out a prediction of points and minutes. 
+This endpoint is used to display predictions for selected players on the website https://fpl-forecast.vercel.app/
