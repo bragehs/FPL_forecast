@@ -7,28 +7,28 @@ interface PredictionProps {
 }
 
 const beautifyMinutes = (minutes: number)  => {
-    const minutesStr = minutes > 60 ? `60>` : String(Math.round(minutes));
-    return minutesStr;
+  return minutes > 60 ? "More than 60" : String(Math.round(minutes));
 };
 
-// Map raw points (≈0–4) into performance tiers.
+// Darker palette; white text on dark backgrounds.
 function beautifyPoints(points?: number) {
   if (points == null || isNaN(points)) {
     return {
       category: "unknown" as const,
       label: "No data",
       range: "",
-      color: "#eeeeee"
+      color: "#eeeeee",
+      textColor: "#222"
     };
   }
-  const p = Math.round(points * 10) / 10; // 1 decimal
+  const p = Math.round(points * 100) / 100;
   if (p < 1)
-    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#ffe5e5" };
+    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#7a1212", textColor: "#ffffff" };
   if (p < 2)
-    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff5cc" };
+    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff6c7", textColor: "#5a4d00" };
   if (p < 3)
-    return { category: "good" as const, label: "Good", range: "2 – <3", color: "#e5f8e5" };
-  return { category: "excellent" as const, label: "Excellent", range: "3+", color: "#d6f0ff" };
+    return { category: "good" as const, label: "Good", range: "2 – <3", color: "#d6ecff", textColor: "#133a52" };
+  return { category: "excellent" as const, label: "Excellent", range: "3+", color: "#0f5f2a", textColor: "#ffffff" };
 }
 
 export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) => {
@@ -46,13 +46,23 @@ export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) 
   const boxStyle: React.CSSProperties = {
     ...baseBoxStyle,
     background: perf.color,
-    transition: "background .25s"
+    color: perf.textColor,
+    borderColor: "rgba(0,0,0,0.15)",
+    transition: "background .25s,color .25s"
+  };
+
+  const metaStyle: React.CSSProperties = {
+    fontSize: 12,
+    opacity: perf.textColor === "#ffffff" ? 0.85 : 0.7,
+    marginBottom: 8
   };
 
   return (
     <div style={boxStyle}>
-      <h2 style={{ margin: "0 0 4px" }}>Prediction {playerName ? `– ${playerName}` : ""}</h2>
-      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>
+        Prediction {playerName ? `– ${playerName}` : ""}
+      </h2>
+      <div style={metaStyle}>
         Raw pts: {points != null ? (Math.round(points * 100) / 100) : "—"}
       </div>
       <div style={rowStyle}>
@@ -69,20 +79,22 @@ export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) 
 
 const baseBoxStyle: React.CSSProperties = {
   marginTop: 16,
-  padding: "12px 16px",
+  padding: "20px 24px",          // increased padding
   border: "1px solid #ddd",
-  borderRadius: 6,
-  maxWidth: 320,
+  borderRadius: 10,              // slightly larger radius
+  maxWidth: 420,                 // wider
   fontFamily: "system-ui, sans-serif",
-  fontSize: 14
+  fontSize: 16,                  // larger base font
+  lineHeight: 1.45
 };
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  padding: "4px 0"
+  padding: "8px 0"               // more vertical spacing
 };
 
 const labelStyle: React.CSSProperties = {
-  fontWeight: 600
+  fontWeight: 600,
+  fontSize: 16
 };
