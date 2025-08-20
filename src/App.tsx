@@ -13,7 +13,7 @@ function App() {
     <div style={outerStyle}>
       <h1 style={{ margin: 0 }}>FPL Points Predictor</h1>
       <p style={subheadStyle}>
-        Prediction uses a compact performance scale (Bad → Excellent). It is for comparing players, not exact FPL match points. Higher = stronger expected gameweek.
+        Points prediction based on past performances. Select a player to see their expected performance for the next gameweek.
       </p>
       <div style={contentRow}>
         <div style={leftCol}>
@@ -34,12 +34,11 @@ const outerStyle: React.CSSProperties = {
   padding: 16,
   gap: 12
 };
-
 const subheadStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 13,
+  fontSize: 18,
   lineHeight: 1.4,
-  fontWeight: 400,
+  fontWeight: 600,
   color: '#555',
   maxWidth: 640
 };

@@ -58,21 +58,26 @@ export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) 
   };
 
   return (
-    <div style={boxStyle}>
-      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>
-        Prediction {playerName ? `– ${playerName}` : ""}
-      </h2>
-      <div style={metaStyle}>
-        Raw pts: {points != null ? (Math.round(points * 100) / 100) : "—"}
-      </div>
-      <div style={rowStyle}>
-        <span style={labelStyle}>Performance:</span>
-        <span>{perf.label} ({perf.range})</span>
-      </div>
-      <div style={rowStyle}>
-        <span style={labelStyle}>Minutes:</span>
-        <span>{minutesDisplay}</span>
-      </div>
+    <div>
+        <div style={boxStyle}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>
+            Prediction {playerName ? `– ${playerName}` : ""}
+        </h2>
+        <div style={metaStyle}>
+            Raw pts: {points != null ? (Math.round(points * 100) / 100) : "—"}
+        </div>
+        <div style={rowStyle}>
+            <span style={labelStyle}>Performance:</span>
+            <span>{perf.label} ({perf.range})</span>
+        </div>
+        <div style={rowStyle}>
+            <span style={labelStyle}>Minutes:</span>
+            <span>{minutesDisplay}</span>
+        </div>
+        </div>
+        <footer style={footerStyle}>
+        <p>Prediction uses a compact performance scale (Bad → Excellent). It is for comparing players, not exact FPL match points. Higher = stronger expected gameweek.</p>
+        </footer>
     </div>
   );
 };
@@ -82,7 +87,7 @@ const baseBoxStyle: React.CSSProperties = {
   padding: "20px 24px",          // increased padding
   border: "1px solid #ddd",
   borderRadius: 10,              // slightly larger radius
-  maxWidth: 420,                 // wider
+  maxWidth: 640,                 // wider
   fontFamily: "system-ui, sans-serif",
   fontSize: 16,                  // larger base font
   lineHeight: 1.45
@@ -97,4 +102,12 @@ const rowStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   fontSize: 16
+};
+
+const footerStyle: React.CSSProperties = {
+  fontSize: 13,
+  lineHeight: 1.4,
+  fontWeight: 400,
+  color: '#555',
+  maxWidth: 640
 };
