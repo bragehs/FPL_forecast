@@ -1,12 +1,11 @@
 // src/App.js
-import React from 'react';
-import PremierLeagueTable from './premierleague.jsx';
+import { PlayerSearch } from "./PlayerSearch";
 
 function App() {
     return (
         <div className="App">
             <h1>Premier League Table</h1>
-            <PremierLeagueTable />
+            <PlayerSearch />
         </div>
     );
 }
