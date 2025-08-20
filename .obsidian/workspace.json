@@ -171,17 +171,21 @@
   },
   "active": "ea72f965b688c550",
   "lastOpenFiles": [
+    "src/Prediction.tsx",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.development.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store.production.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store.development.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-with-selector.production.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-with-selector.development.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.native.production.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.native.development.js",
+    "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.development.js",
+    "node_modules/use-sync-external-store/README.md",
+    "node_modules/dequal/readme.md",
+    "node_modules/swr/README.md",
     "README.md",
-    "PLAN.md",
-    "predictor/best_model.pth",
-    "backend/predictor/best_model.pth",
-    "backend/predictor/training.py",
-    "backend/training.py",
-    "training.py",
-    "backend/predictor/model.py",
-    "backend/model.py",
-    "model.py",
-    "backend/predictor/summed_df_debug.csv",
-    "backend/best_model.pth"
+    "PLAN.md"
   ]
 }

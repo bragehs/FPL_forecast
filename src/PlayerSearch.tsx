@@ -8,7 +8,7 @@ interface PlayerEntry {
 }
 
 interface PlayerSearchProps {
-  onPlayerSelect?: (playerId: PlayerEntry['id']) => void;
+  onPlayerSelect: (playerId: PlayerEntry['id'], playerName: PlayerEntry['name']) => void;
   placeholder?: string;
 }
 
@@ -41,14 +41,9 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
       )
       .slice(0, 100);
   }, [players, query]);
-
-  const placeholderSelect = useCallback((playerId: PlayerEntry['id']) => {
-    console.log('Selected player id:', playerId);
-  }, []);
-
   const handleSelect = useCallback((player: PlayerEntry) => {
-    (onPlayerSelect || placeholderSelect)(player.id);
-  }, [onPlayerSelect, placeholderSelect]);
+    onPlayerSelect(player.id, player.name);
+  }, [onPlayerSelect]);
 
   const onKeyDown: React.KeyboardEventHandler<HTMLInputElement> = e => {
     if (e.key === 'ArrowDown') {
