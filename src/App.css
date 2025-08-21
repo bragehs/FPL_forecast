@@ -1,32 +1,41 @@
-.table {
-  text-align: center;
-}
-
-.table td, .table th {
-  padding: .25rem;
-}
-
-.table .position {
-  width: 5%;
-}
-
-.table .points, .table .played, .table .won, .table .draw, .table .lost, .table .ga {
-  width: 10%;
-}
-
-.table .badge-td {
-  width: 5%;
-}
-
-.badge{
-  width: 30px;
-  height: 30px;
-  margin-right: 10px;
+.outer {
+  flex: 1;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
 }
 
-.badge img{
-  max-width: 100%;
-  max-height: 100%;
+.subhead {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #555;
+  max-width: 640px;
+}
+
+.content-row {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  min-height: 0;
+}
+
+@media (max-width: 768px) {
+  .content-row {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+.left-col {
+  flex: 1;
+  max-width: 520px;
+}
+
+.right-col {
+  width: 340px;
+  flex-shrink: 0;
 }

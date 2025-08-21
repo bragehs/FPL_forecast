@@ -18,6 +18,7 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const [open, setOpen] = useState(false);
 
   // Map object { name: id } -> array [{ name, id }]
   const players: PlayerEntry[] = useMemo(() => {
@@ -33,7 +34,15 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return players.slice(0, 50);
+    if (!q) {
+      const salah = players.find(
+        p =>
+          String(p.id) === '381' ||
+          p.name.toLowerCase() === 'mohamed salah' ||
+          p.name.toLowerCase().includes('salah')
+      );
+      return salah ? [salah] : [];
+    }
     return players
       .filter(p =>
         p.name.toLowerCase().includes(q) ||
@@ -41,13 +50,17 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
       )
       .slice(0, 100);
   }, [players, query]);
+
   const handleSelect = useCallback((player: PlayerEntry) => {
     onPlayerSelect(player.id, player.name);
+    setFocusedIndex(-1);
+    setOpen(false);
   }, [onPlayerSelect]);
 
   const onKeyDown: React.KeyboardEventHandler<HTMLInputElement> = e => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      setOpen(true);
       setFocusedIndex(i => Math.min(i + 1, filtered.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -58,6 +71,7 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
       }
     } else if (e.key === 'Escape') {
       setFocusedIndex(-1);
+      setOpen(false);
     }
   };
 
@@ -70,14 +84,16 @@ export const PlayerSearch: React.FC<PlayerSearchProps> = ({
         onChange={e => {
           setQuery(e.target.value);
           setFocusedIndex(-1);
+          setOpen(true);
         }}
+        onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
         style={inputStyle}
         aria-autocomplete="list"
-        aria-expanded={filtered.length > 0}
+        aria-expanded={open && filtered.length > 0}
         aria-activedescendant={focusedIndex >= 0 ? `player-opt-${filtered[focusedIndex].id}` : undefined}
       />
-      {filtered.length > 0 && (
+      {open && filtered.length > 0 && (
         <ul style={listStyle} role="listbox">
           {filtered.map((p, idx) => {
             const active = idx === focusedIndex;
