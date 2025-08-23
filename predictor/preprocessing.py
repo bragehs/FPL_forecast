@@ -30,6 +30,9 @@ player_features_to_lag = [
      'yellow_cards',
      'team_score',
      'opponent_score',
+     'expected_goals',
+     'expected_assists',
+     'expected_goals_conceded',
     ]
 
 
@@ -127,7 +130,7 @@ def filter_data(df):
     df.loc[df['fixture_difficulty'] == 1, 'fixture_difficulty'] = 2
     df.loc[df['fixture_difficulty'].isna(), 'fixture_difficulty'] = 0
     df = df[df['position'] != 'AM']  # Exclude managers
-    df.dropna(inplace=True, subset=["team_h_score", "team_a_score", "team_score", "opponent_score"])
+    df.dropna(inplace=True, subset=["team_h_score", "team_a_score", "team_score", "opponent_score", "expected_goals"])
     df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
     return df
 
@@ -208,24 +211,8 @@ def add_fixture_difficulty_to_dataframe(df, backend_root):
 def add_new_features(df):
     df["team_score"] = df.apply(lambda row: row["team_h_score"] if row["was_home"] else row["team_a_score"], axis=1)
     df["opponent_score"] = df.apply(lambda row: row["team_a_score"] if row["was_home"] else row["team_h_score"], axis=1)
-    return df
-
-def add_future_lagged_features(df, lagged_features=['was_home', 'fixture_difficulty']):
-    # Sort by player and gameweek to ensure proper ordering
-    df = df.sort_values(['season_x', 'GW']).reset_index(drop=True)
-    
-    for feature in lagged_features:
-        # Create lagged feature
-        df[f'lagged_{feature}'] = df.groupby(['element', 'season_x'])[feature].shift(1)
-        
-        # Fill NaN values with appropriate defaults - use proper pandas method
-        if feature == 'was_home':
-            # For boolean, use False as default (or the current value)
-            df[f'lagged_{feature}'] = df[f'lagged_{feature}'].fillna(df[feature]).infer_objects(copy=False)
-        elif feature == 'fixture_difficulty':
-            # Use average difficulty or current value
-            df[f'lagged_{feature}'] = df[f'lagged_{feature}'].fillna(df[feature]).infer_objects(copy=False)
-    
+    df["did_play"] = (df["minutes"] > 0).astype(float)
+    df["p_60"] = (df["minutes"] >= 60).astype(float)
     return df
 
 def normalize_and_encode(df, 
@@ -324,7 +311,7 @@ def player_lag_features(gw_df, features, lags):
     return out_df, lagged_features
 
 
-def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], static_features=[]):
+def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], static_features=[], component_target_cols=None):
     """
     Create sequences of data for each player with mapping information.
     For early gameweeks, pad with zeros:
@@ -340,7 +327,7 @@ def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], sta
         mapping_df: DataFrame with player/GW info for each sequence
     """
     feature_cols = sorted([col for col in df.columns if col not in meta_data + static_features])
-    X_seq_gw, X_seq_static, y_seq, minutes_seq = [], [], [], []
+    X_seq_gw, X_seq_static, y_seq = [], [], []
     mapping_info = []
     print("order of features:", feature_cols)
     print("order of static features:", static_features)
@@ -376,8 +363,10 @@ def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], sta
                 static_data = actual_history.iloc[-1][static_features].values 
 
             # Get target values
-            target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
-            minutes = group.iloc[target_start_idx:target_start_idx + future_sequences]['minutes'].values
+            if component_target_cols:
+                target = group.iloc[target_start_idx:target_start_idx + future_sequences][component_target_cols].values
+            else:
+                target = group.iloc[target_start_idx:target_start_idx + future_sequences]['total_points'].values
 
             if len(target) != future_sequences:
                 continue
@@ -385,7 +374,6 @@ def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], sta
             X_seq_gw.append(sequence_data_gw)
             X_seq_static.append(static_data)
             y_seq.append(target)
-            minutes_seq.append(minutes)
 
             
             # Store mapping information for the prediction gameweek
@@ -408,10 +396,9 @@ def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], sta
     X_tensor = torch.tensor(np.array(X_seq_gw), dtype=torch.float32)
     X_static_tensor = torch.from_numpy(np.stack([np.asarray(a, dtype=np.float32) for a in X_seq_static]))
     y_tensor = torch.tensor(np.array(y_seq), dtype=torch.float32)
-    minutes_tensor = torch.tensor(np.array(minutes_seq), dtype=torch.float32)
     mapping_df = pd.DataFrame(mapping_info)
 
-    return X_tensor, X_static_tensor, y_tensor, minutes_tensor, mapping_df
+    return X_tensor, X_static_tensor, y_tensor, mapping_df
 
 def main():
     base_path = os.getcwd() + '/predictor/'
@@ -443,19 +430,19 @@ def main():
     data, static_features = player_lag_features(data, player_features_to_lag, ["all"])
     lagged_features = per_GW_lagged_features + static_features
 
-    data = add_future_lagged_features(data)
     #include new lagged features
-    lagged_features.extend(["lagged_was_home", "lagged_fixture_difficulty"])
+    lagged_features.extend(["was_home", "fixture_difficulty"])
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "total_points"]]
-    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'minutes', 'position_encoded']
+    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'did_play', 'p_60',
+                 'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
 
     seasons = np.unique(data["season_x"])
-    number_of_training_seasons = len(seasons) - 2
+    number_of_training_seasons = len(seasons) - 1
     train_seasons = seasons[:number_of_training_seasons]
-    val_seasons = seasons[number_of_training_seasons:number_of_training_seasons + 1]
-    test_seasons = seasons[number_of_training_seasons + 1:]
+    val_seasons = seasons[number_of_training_seasons:]
+    test_seasons = seasons[number_of_training_seasons:]
     print("train seasons:", train_seasons)
     print("val seasons:", val_seasons)
     print("test seasons:", test_seasons)
@@ -486,7 +473,8 @@ def main():
     position_columns = [col for col in train.columns if col.startswith('position_encoded_')]
     static_features.extend(position_columns)
     lagged_features.extend(position_columns)
-    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'minutes', 'position_encoded']
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'did_play',
+                      'p_60', 'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
     needed_features = extra_needed + lagged_features
 
     for col in [col for col in needed_features if col not in ['season_x', 'name']]:
@@ -504,15 +492,16 @@ def main():
     for df in [train, val, test]:
         print(df.isna().sum())
 
-    X_train, X_static_train, y_train, minutes_train, train_mapping = create_sequences(
+    X_train, X_static_train, y_train, train_mapping = create_sequences(
         train[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
         meta_data= extra_needed,
         static_features=static_features,
+        component_target_cols=["expected_goals", "expected_assists", "clean_sheets", "did_play", "p_60"]
     )
 
-    X_val, X_static_val, y_val, minutes_val, val_mapping = create_sequences(
+    X_val, X_static_val, y_val, val_mapping = create_sequences(
         val[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
@@ -520,7 +509,7 @@ def main():
         static_features=static_features,
     )
 
-    X_test, X_static_test, y_test, minutes_test, test_mapping = create_sequences(
+    X_test, X_static_test, y_test, test_mapping = create_sequences(
         test[needed_features], 
         past_sequences=5, 
         future_sequences=1, 
@@ -536,19 +525,16 @@ def main():
     torch.save(X_train, os.path.join(output_dir, "X_train.pt"))
     torch.save(X_static_train, os.path.join(output_dir, "X_static_train.pt"))
     torch.save(y_train, os.path.join(output_dir, "y_train.pt"))
-    torch.save(minutes_train, os.path.join(output_dir, "minutes_train.pt"))
     train_mapping.to_csv(os.path.join(output_dir, "train_mapping.csv"), index=False)
 
     torch.save(X_val, os.path.join(output_dir, "X_val.pt"))
     torch.save(X_static_val, os.path.join(output_dir, "X_static_val.pt"))
     torch.save(y_val, os.path.join(output_dir, "y_val.pt"))
-    torch.save(minutes_val, os.path.join(output_dir, "minutes_val.pt"))
     val_mapping.to_csv(os.path.join(output_dir, "val_mapping.csv"), index=False)
 
     torch.save(X_test, os.path.join(output_dir, "X_test.pt"))
     torch.save(X_static_test, os.path.join(output_dir, "X_static_test.pt"))
     torch.save(y_test, os.path.join(output_dir, "y_test.pt"))
-    torch.save(minutes_test, os.path.join(output_dir, "minutes_test.pt"))
     test_mapping.to_csv(os.path.join(output_dir, "test_mapping.csv"), index=False)
 
 if __name__ == "__main__":

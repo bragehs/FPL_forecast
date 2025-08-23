@@ -28,7 +28,14 @@ class AttentionPool(nn.Module):
         w = torch.softmax(scores, dim=-1).unsqueeze(-1)  # (B,T,1)
         return (x * w).sum(dim=1), w.squeeze(-1)
 
-class FPLSequenceModel(nn.Module):
+class FPLComponentModel(nn.Module):
+    """
+    Outputs:
+      expected_goals (>=0)
+      expected_assists (>=0)
+      clean_sheet_logit (raw logit; apply sigmoid)
+      minutes (>=0)
+    """
     def __init__(
         self,
         numeric_seq_dim,
@@ -36,21 +43,14 @@ class FPLSequenceModel(nn.Module):
         hidden_dim=128,
         lstm_layers=2,
         dropout=0.3,
-        multitask=False
     ):
         super().__init__()
-
-        self.embedding_dropout = nn.Dropout(0.1)
-
-        lstm_input_dim = numeric_seq_dim
-
-        self.lstm_layers = lstm_layers
         self.hidden_dim = hidden_dim
+        self.lstm_layers = lstm_layers
         self.dropout = dropout
-
         self.locked_dropout_in = LockedDropout(dropout)
         self.lstm = nn.LSTM(
-            lstm_input_dim,
+            numeric_seq_dim,
             hidden_dim,
             num_layers=lstm_layers,
             batch_first=True,
@@ -59,80 +59,43 @@ class FPLSequenceModel(nn.Module):
         self.locked_dropout_out = LockedDropout(dropout)
         self.attn_pool = AttentionPool(hidden_dim)
         self.out_dropout = nn.Dropout(dropout * 0.5)
-
         fusion_dim = hidden_dim * 3 + static_dim  # attn + mean + max + static
-
-        self.head_points = nn.Sequential(
+        self.backbone = nn.Sequential(
             nn.Linear(fusion_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, 1)
+            nn.Dropout(0.2)
         )
+        self.head = nn.Linear(hidden_dim, 5)
 
-        self.multitask = multitask
-        if multitask:
-            self.head_minutes = nn.Linear(fusion_dim, 1)
-
-    def forward(
-        self,
-        seq_numeric,         # (B,T,Fn)
-        static_numeric,      # (B,Fs)
-    ):
-        B, T, _ = seq_numeric.shape
-
-        x = seq_numeric
-        x = self.embedding_dropout(x)
-        x = self.locked_dropout_in(x)
-        out, _ = self.lstm(x)
+    def forward(self, seq_numeric, static_numeric):
+        out, _ = self.lstm(self.locked_dropout_in(seq_numeric))
         out = self.locked_dropout_out(out)
-
         attn_vec, _ = self.attn_pool(out)
         mean_pool = out.mean(dim=1)
         max_pool, _ = out.max(dim=1)
         fused = torch.cat([attn_vec, mean_pool, max_pool, static_numeric], dim=-1)
         fused = self.out_dropout(fused)
-        points = self.head_points(fused)
-
-        if self.multitask:
-            minutes = self.head_minutes(fused)
-            return points, minutes
-        return points
+        z = self.backbone(fused)
+        raw = self.head(z)  # (B,5)
+        # Split & apply activations
+        raw_xg, raw_xa, cs_logit, p_play, p_60 = torch.unbind(raw, dim=-1)
+        pred_xg = torch.nn.functional.softplus(raw_xg)
+        pred_xa = torch.nn.functional.softplus(raw_xa)
+        return {
+            "expected_goals": pred_xg,
+            "expected_assists": pred_xa,
+            "clean_sheet_logit": cs_logit,   # apply sigmoid outside if needed
+            "will_play": p_play,
+            "p_60": p_60,
+        }
 
 if __name__ == "__main__":
-    B = 32
-    T = 5
-    seq_feat_dim = 26          # per-GW numeric features
-    static_feat_dim = 8        # example: season aggregates, team strength, etc.
-    #SEPARATES INTO STATIC AND PER-GW FEATURES
-    # Fake dataß
-    seq_numeric = torch.randn(B, T, seq_feat_dim)
-    static_numeric = torch.randn(B, static_feat_dim)
-
-    # 1. Plain model (no embeddings, single-task)
-    model_plain = FPLSequenceModel(
-        numeric_seq_dim=seq_feat_dim,
-        static_dim=static_feat_dim,
-        hidden_dim=128,
-        lstm_layers=2,
-        dropout=0.3
-    )
-    out_plain = model_plain(seq_numeric, static_numeric)
-    print("Plain output shape:", out_plain.shape)
-    print(out_plain)
-    # 2. with multitask
-
-    model_embed = FPLSequenceModel(
-        numeric_seq_dim=seq_feat_dim,
-        static_dim=static_feat_dim,
-        hidden_dim=128,
-        lstm_layers=2,
-        dropout=0.3,
-        multitask=True
-    )
-
-
-    points, minutes = model_embed(
-        seq_numeric=seq_numeric,
-        static_numeric=static_numeric,
-    )
-    print("Multitask shapes:", points.shape, minutes.shape)
+    B,T = 8,5
+    seq_feat_dim=26
+    static_feat_dim=10
+    model = FPLComponentModel(seq_feat_dim, static_feat_dim)
+    dummy_seq = torch.randn(B,T,seq_feat_dim)
+    dummy_static = torch.randn(B,static_feat_dim)
+    out = model(dummy_seq, dummy_static)
+    for k,v in out.items():
+        print(k, v.shape)

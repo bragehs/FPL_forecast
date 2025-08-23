@@ -4,6 +4,42 @@ import numpy as np
 import os
 import torch
 
+def expected_fpl_points(preds, position_one_hot):
+    """
+    Compute expected FPL points from component predictions using one-hot positions.
+
+    position_one_hot: tensor (B,4) columns correspond to:
+        [position_encoded_1 (GK), position_encoded_2 (DEF),
+         position_encoded_3 (MID), position_encoded_4 (FWD)]
+    """
+    # Component predictions
+    xg = preds["expected_goals"]          # (B,)
+    xa = preds["expected_assists"]        # (B,)
+    cs_prob = torch.sigmoid(preds["clean_sheet_logit"])  # (B,)
+    will_play = torch.sigmoid(preds["will_play"])              # (B,)
+    p_60 = torch.sigmoid(preds["p_60"])         # (B,)
+
+    # Appearance points (hard thresholds)
+    appear1 = (will_play > 0.5).float()
+    appear2 = (p_60 > 0.5).float()
+
+    # Goal / clean sheet point weights aligned with one-hot order [GK, DEF, MID, FWD]
+    # Goal points: GK 6, DEF 6, MID 5, FWD 4
+    goal_pts_vec = torch.tensor([6.0, 6.0, 5.0, 4.0], device=will_play.device)
+    # Clean sheet points: GK 4, DEF 4, MID 1, FWD 0
+    cs_pts_vec = torch.tensor([4.0, 4.0, 1.0, 0.0], device=will_play.device)
+
+    # Reduce one-hot to per-sample scalars
+    goal_pts = (position_one_hot * goal_pts_vec.unsqueeze(0)).sum(dim=1)  # (B,)
+    cs_pts = (position_one_hot * cs_pts_vec.unsqueeze(0)).sum(dim=1)      # (B,)
+
+    exp_goal_pts = xg * goal_pts
+    exp_ast_pts = xa * 3.0
+    exp_cs_pts = cs_prob * cs_pts * appear2  # only if 60+
+
+    exp_total = appear1 + appear2 + exp_goal_pts + exp_ast_pts + exp_cs_pts
+    return exp_total
+
 data_path = os.getcwd() + '/processed_data'
 
 def make_available_players_df(this_season_player_df, last_season_player_df):
