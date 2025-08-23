@@ -386,7 +386,7 @@ def create_sequences(df, past_sequences=5, future_sequences=3, meta_data=[], sta
                 'prediction_gw': prediction_gw,
                 'team_x': group.iloc[target_start_idx]['team_x'] if 'team_x' in group.columns else None,
                 'value': group.iloc[target_start_idx]['value'] if 'value' in group.columns else None,
-                'minutes': group.iloc[target_start_idx]['minutes'] if 'minutes' in group.columns else None,
+                'minutes': group.iloc[target_start_idx]['minutes'],
                 'last_1_goals_scored': group.iloc[target_start_idx]['last_1_goals_scored'] if 'last_1_goals_scored' in group.columns else None,
                 'last_1_assists': group.iloc[target_start_idx]['last_1_assists'] if 'last_1_assists' in group.columns else None,
                 'padding_used': max(0, past_sequences - (i + 1)),  # Track how much padding was used
@@ -435,7 +435,7 @@ def main():
 
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "total_points"]]
-    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'did_play', 'p_60',
+    meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'did_play', 'p_60','minutes',
                  'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
 
     seasons = np.unique(data["season_x"])
@@ -473,7 +473,7 @@ def main():
     position_columns = [col for col in train.columns if col.startswith('position_encoded_')]
     static_features.extend(position_columns)
     lagged_features.extend(position_columns)
-    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'did_play',
+    extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'did_play', 'minutes',
                       'p_60', 'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
     needed_features = extra_needed + lagged_features
 
