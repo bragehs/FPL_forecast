@@ -9,26 +9,6 @@ import numpy as np
 import random
 from eval import expected_fpl_points
 
-def focal_loss(logits, targets, alpha: float = 0.25, gamma: float = 2.0, reduction: str = "mean"):
-    """
-    Binary focal loss with logits.
-    logits: (N, ...) raw scores
-    targets: same shape, 0/1
-    alpha: weight for positive class (neg gets 1-alpha)
-    gamma: focusing parameter
-    """
-    bce = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
-    probs = torch.sigmoid(logits)
-    p_t = probs * targets + (1 - probs) * (1 - targets)          # p_t
-    alpha_t = alpha * targets + (1 - alpha) * (1 - targets)      # class weighting
-    focal_factor = (1 - p_t).pow(gamma)
-    loss = alpha_t * focal_factor * bce
-    if reduction == "mean":
-        return loss.mean()
-    elif reduction == "sum":
-        return loss.sum()
-    return loss
-
 class CustomLoss(torch.nn.Module):
     def __init__(self, weights=None):
         super().__init__()
@@ -40,12 +20,9 @@ class CustomLoss(torch.nn.Module):
             targets = targets.squeeze(1)
         xgTarget, xaTarget, csTarget, willPlayTarget, p60Target = targets.unbind(-1)
         # targets: dict tensors with same batch size
-        loss_xg = F.huber_loss(preds["expected_goals"], xgTarget)
-        loss_xa = F.huber_loss(preds["expected_assists"], xaTarget)
-        loss_cs = focal_loss(
-            preds["clean_sheet_logit"],
-            csTarget
-        )
+        loss_xg = F.mse_loss(preds["expected_goals"], xgTarget)
+        loss_xa = F.mse_loss(preds["expected_assists"], xaTarget)
+        loss_cs = F.binary_cross_entropy_with_logits(preds["clean_sheet_logit"], csTarget)
         # Huber for minutes
         loss_will_play = F.binary_cross_entropy_with_logits(preds["will_play"], willPlayTarget)
         loss_p_60 = F.binary_cross_entropy_with_logits(preds["p_60"], p60Target)
