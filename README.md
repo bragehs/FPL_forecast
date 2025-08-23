@@ -21,13 +21,13 @@ ignore this currently. contains code from a previous project which will not be u
 
 ## DONE
 
-predictor folder contains scripts which, from a csv file fetched from https://github.com/vaastav/Fantasy-Premier-League, produces an LSTM model that simulates a score in FPL. Getting a good automated strategy is very demanding though. Accounting for risk of transfers, incorporating wildcards and triple captain etc. Therefore i decided to let the model showcase its raw predictive power by letting it pick its dream team for each gameweek, still within constraints. Basically if you had 38 free hit cards. Then the model produced a score of 2298, which is at least more than I usually get at least.  It is of course a huge difference to be able to change the entire team, but it suggests the model is performing decently. There is no triple captain or bench boost included though. 
+predictor folder contains scripts which, from a csv file fetched from https://github.com/vaastav/Fantasy-Premier-League, produces an LSTM model that simulates a score in FPL. Getting a good automated strategy is very demanding though. Accounting for risk of transfers, incorporating wildcards and triple captain etc. Therefore i decided to let the model showcase its raw predictive power by letting it pick its dream team for each gameweek, still within constraints. Basically if you had 38 free hit cards. Then the model produced a score of 2352, which is at least more than I have ever gotten.  It is of course a huge difference to be able to change the entire team, but it suggests the model is performing decently. There is no triple captain or bench boost included though. 
 
 This model is probably best used as a tool for a human to actually play FPL, instead of it playing FPL for you. It will of course usually predict Salah to get a lot of points, but it can provide more value in the players you do not know much about. 
 
 
 I have also created an endpoint on huggingFace which returns a prediction for a player for the next gameweek when requesting with player id. 
-## TODO
 
-create a website where:
-- you can search for players and ask the model to give out a prediction of points and minutes. 
+on the website you can search for any player and the model will give you his expected points for the next gameweek.
+## TODO
+have a better overview of stats for each player. also be able to see all predictions together to compare. general better styling
