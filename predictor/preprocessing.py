@@ -436,7 +436,7 @@ def main():
 
     continuous_features = [col for col in lagged_features if col not in ["was_home", "total_points"]]
     meta_data = ['season_x', 'value', 'team_x', 'name', 'element', 'did_play', 'p_60','minutes',
-                 'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
+                 'position_encoded', 'goals_scored', 'assists', 'clean_sheets']
 
     seasons = np.unique(data["season_x"])
     number_of_training_seasons = len(seasons) - 1
@@ -474,7 +474,7 @@ def main():
     static_features.extend(position_columns)
     lagged_features.extend(position_columns)
     extra_needed =  ['element', 'total_points', 'GW', 'season_x', 'name', 'value', 'did_play', 'minutes',
-                      'p_60', 'position_encoded', 'expected_goals', 'expected_assists', 'clean_sheets']
+                      'p_60', 'position_encoded', 'goals_scored', 'assists', 'clean_sheets']
     needed_features = extra_needed + lagged_features
 
     for col in [col for col in needed_features if col not in ['season_x', 'name']]:
@@ -498,7 +498,7 @@ def main():
         future_sequences=1, 
         meta_data= extra_needed,
         static_features=static_features,
-        component_target_cols=["expected_goals", "expected_assists", "clean_sheets", "did_play", "p_60"]
+        component_target_cols=["goals_scored", "assists", "clean_sheets", "did_play", "p_60"]
     )
 
     X_val, X_static_val, y_val, val_mapping = create_sequences(

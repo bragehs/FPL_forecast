@@ -13,8 +13,8 @@ def expected_fpl_points(preds, position_one_hot):
          position_encoded_3 (MID), position_encoded_4 (FWD)]
     """
     # Component predictions
-    xg = preds["expected_goals"]          # (B,)
-    xa = preds["expected_assists"]        # (B,)
+    xg = preds["goals_scored"]          # (B,)
+    xa = preds["assists"]        # (B,)
     cs_prob = torch.sigmoid(preds["clean_sheet_logit"])  # (B,)
     will_play = torch.sigmoid(preds["will_play"])              # (B,)
     p_60 = torch.sigmoid(preds["p_60"])         # (B,)

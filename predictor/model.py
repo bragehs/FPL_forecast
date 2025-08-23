@@ -78,12 +78,12 @@ class FPLComponentModel(nn.Module):
         z = self.backbone(fused)
         raw = self.head(z)  # (B,5)
         # Split & apply activations
-        raw_xg, raw_xa, cs_logit, p_play, p_60 = torch.unbind(raw, dim=-1)
-        pred_xg = torch.nn.functional.softplus(raw_xg)
-        pred_xa = torch.nn.functional.softplus(raw_xa)
+        raw_goals, raw_assists, cs_logit, p_play, p_60 = torch.unbind(raw, dim=-1)
+        pred_goals = torch.nn.functional.softplus(raw_goals)
+        pred_assists = torch.nn.functional.softplus(raw_assists)
         return {
-            "expected_goals": pred_xg,
-            "expected_assists": pred_xa,
+            "goals_scored": pred_goals,
+            "assists": pred_assists,
             "clean_sheet_logit": cs_logit,   # apply sigmoid outside if needed
             "will_play": p_play,
             "p_60": p_60,
