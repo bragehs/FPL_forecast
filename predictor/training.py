@@ -20,12 +20,19 @@ class CustomLoss(torch.nn.Module):
             targets = targets.squeeze(1)
         xgTarget, xaTarget, csTarget, willPlayTarget, p60Target = targets.unbind(-1)
         # targets: dict tensors with same batch size
-        loss_xg = F.mse_loss(preds["expected_goals"], xgTarget)
-        loss_xa = F.mse_loss(preds["expected_assists"], xaTarget)
-        loss_cs = F.binary_cross_entropy_with_logits(preds["clean_sheet_logit"], csTarget)
-        # Huber for minutes
+        play_mask = willPlayTarget > 0.5
+        if play_mask.sum() == 0:
+            loss_xg = torch.tensor(0., device=preds["expected_goals"].device)
+            loss_xa = torch.tensor(0., device=preds["expected_assists"].device)
+            loss_cs = torch.tensor(0., device=preds["clean_sheet_logit"].device)
+            loss_p_60 = torch.tensor(0., device=preds["p_60"].device)
+        else:
+            loss_xg = F.mse_loss(preds["expected_goals"][play_mask], xgTarget[play_mask])
+            loss_xa = F.mse_loss(preds["expected_assists"][play_mask], xaTarget[play_mask])
+            loss_cs = F.binary_cross_entropy_with_logits(preds["clean_sheet_logit"][play_mask], csTarget[play_mask])
+            loss_p_60 = F.binary_cross_entropy_with_logits(preds["p_60"][play_mask], p60Target[play_mask])
+
         loss_will_play = F.binary_cross_entropy_with_logits(preds["will_play"], willPlayTarget)
-        loss_p_60 = F.binary_cross_entropy_with_logits(preds["p_60"], p60Target)
 
         total = self.weights["xg"]*loss_xg + self.weights["xa"]*loss_xa + self.weights["cs"]*loss_cs + self.weights["mins"]*loss_will_play + self.weights["mins"]*loss_p_60
         return total, {
@@ -148,7 +155,7 @@ def train_model(
                     'lstm_layers': int(model.lstm_layers),
                     'dropout': float(model.dropout)}
                 torch.save(model_data, f"best_model.pth")
-                print(f"Best model saved at epoch {epoch+1} with MAE: {best_performance:.4f}")
+                print(f"Best model saved at epoch {epoch+1} with RMSE: {best_performance:.4f}")
     return best_performance
 
 def hyperparameter_tuning(

@@ -4,41 +4,53 @@ import numpy as np
 import os
 import torch
 
-def expected_fpl_points(preds, position_one_hot):
+def expected_fpl_points(preds, position_one_hot, return_components=False):
     """
-    Compute expected FPL points from component predictions using one-hot positions.
+    Compose unconditional expected FPL points from conditional component heads.
 
-    position_one_hot: tensor (B,4) columns correspond to:
-        [position_encoded_1 (GK), position_encoded_2 (DEF),
-         position_encoded_3 (MID), position_encoded_4 (FWD)]
+    preds keys:
+      expected_goals          (E[goals | played])
+      expected_assists        (E[assists | played])
+      clean_sheet_logit       (logit P(clean sheet | played) )
+      will_play               (logit P(played >=1))
+      p_60                    (logit P(played >=60 | played))
+
+    position_one_hot: (B,4) one-hot [GK, DEF, MID, FWD]
     """
-    # Component predictions
-    xg = preds["expected_goals"]          # (B,)
-    xa = preds["expected_assists"]        # (B,)
-    cs_prob = torch.sigmoid(preds["clean_sheet_logit"])  # (B,)
-    will_play = torch.sigmoid(preds["will_play"])              # (B,)
-    p_60 = torch.sigmoid(preds["p_60"])         # (B,)
+    p_play = torch.sigmoid(preds["will_play"])          # P(play >=1)
+    p_60_cond = torch.sigmoid(preds["p_60"])            # P( >=60 | play )
+    p_60 = p_play * p_60_cond                           # unconditional P( >=60 )
 
-    # Appearance points (hard thresholds)
-    appear1 = (will_play > 0.5).float()
-    appear2 = (p_60 > 0.5).float()
+    xg = preds["expected_goals"]                        # E[goals | played]
+    xa = preds["expected_assists"]                      # E[assists | played]
+    cs_prob_cond = torch.sigmoid(preds["clean_sheet_logit"])  # P(CS | played)
 
-    # Goal / clean sheet point weights aligned with one-hot order [GK, DEF, MID, FWD]
-    # Goal points: GK 6, DEF 6, MID 5, FWD 4
-    goal_pts_vec = torch.tensor([6.0, 6.0, 5.0, 4.0], device=will_play.device)
-    # Clean sheet points: GK 4, DEF 4, MID 1, FWD 0
-    cs_pts_vec = torch.tensor([4.0, 4.0, 1.0, 0.0], device=will_play.device)
+    device = p_play.device
+    goal_pts_vec = torch.tensor([6.0, 6.0, 5.0, 4.0], device=device)
+    cs_pts_vec   = torch.tensor([4.0, 4.0, 1.0, 0.0], device=device)
 
-    # Reduce one-hot to per-sample scalars
-    goal_pts = (position_one_hot * goal_pts_vec.unsqueeze(0)).sum(dim=1)  # (B,)
-    cs_pts = (position_one_hot * cs_pts_vec.unsqueeze(0)).sum(dim=1)      # (B,)
+    goal_pts_per_goal = (position_one_hot * goal_pts_vec.unsqueeze(0)).sum(-1)  # (B,)
+    cs_pts_value      = (position_one_hot * cs_pts_vec.unsqueeze(0)).sum(-1)
 
-    exp_goal_pts = xg * goal_pts
-    exp_ast_pts = xa * 3.0
-    exp_cs_pts = cs_prob * cs_pts * appear2  # only if 60+
+    # Components
+    appearance_pts = p_play + p_60                        # p_play*(1 - p_60_cond) + 2*p_play*p_60_cond simplified
+    goal_pts       = p_play * xg * goal_pts_per_goal
+    assist_pts     = p_play * xa * 3.0
+    cs_pts         = p_play * p_60_cond * cs_prob_cond * cs_pts_value  # need 60+ mins
 
-    exp_total = appear1 + appear2 + exp_goal_pts + exp_ast_pts + exp_cs_pts
-    return exp_total
+    total = appearance_pts + goal_pts + assist_pts + cs_pts
+
+    if return_components:
+        return {
+            "total": total,
+            "appearance": appearance_pts,
+            "goals": goal_pts,
+            "assists": assist_pts,
+            "clean_sheet": cs_pts,
+            "p_play": p_play,
+            "p_60": p_60,
+        }
+    return total
 
 data_path = os.getcwd() + '/processed_data'
 
