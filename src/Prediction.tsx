@@ -23,12 +23,12 @@ function beautifyPoints(points?: number) {
   }
   const p = Math.round(points * 100) / 100;
   if (p < 2)
-    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#7a1212", textColor: "#ffffff" };
+    return { category: "bad" as const, label: "Bad", range: "0 – <2", color: "#7a1212", textColor: "#ffffff" };
   if (p < 3)
-    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff6c7", textColor: "#5a4d00" };
+    return { category: "okay" as const, label: "Okay", range: "2 – <3", color: "#fff6c7", textColor: "#5a4d00" };
   if (p < 4)
-    return { category: "good" as const, label: "Good", range: "2 – <3", color: "#d6ecff", textColor: "#133a52" };
-  return { category: "excellent" as const, label: "Excellent", range: "3+", color: "#0f5f2a", textColor: "#ffffff" };
+    return { category: "good" as const, label: "Good", range: "3 – <4", color: "#d6ecff", textColor: "#133a52" };
+  return { category: "excellent" as const, label: "Excellent", range: "4+", color: "#0f5f2a", textColor: "#ffffff" };
 }
 
 export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) => {
