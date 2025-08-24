@@ -22,11 +22,11 @@ function beautifyPoints(points?: number) {
     };
   }
   const p = Math.round(points * 100) / 100;
-  if (p < 1)
-    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#7a1212", textColor: "#ffffff" };
   if (p < 2)
-    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff6c7", textColor: "#5a4d00" };
+    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#7a1212", textColor: "#ffffff" };
   if (p < 3)
+    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff6c7", textColor: "#5a4d00" };
+  if (p < 4)
     return { category: "good" as const, label: "Good", range: "2 – <3", color: "#d6ecff", textColor: "#133a52" };
   return { category: "excellent" as const, label: "Excellent", range: "3+", color: "#0f5f2a", textColor: "#ffffff" };
 }
