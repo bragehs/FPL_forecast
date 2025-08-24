@@ -22,14 +22,13 @@ function beautifyPoints(points?: number) {
     };
   }
   const p = Math.round(points * 100) / 100;
-  console.log("raw points:", p);
+  if (p < 1)
+    return { category: "bad" as const, label: "Bad", range: "0 – <1", color: "#7a1212", textColor: "#ffffff" };
   if (p < 2)
-    return { category: "bad" as const, label: "Bad",  color: "#7a1212", textColor: "#ffffff" };
+    return { category: "okay" as const, label: "Okay", range: "1 – <2", color: "#fff6c7", textColor: "#5a4d00" };
   if (p < 3)
-    return { category: "okay" as const, label: "Okay", color: "#fff6c7", textColor: "#5a4d00" };
-  if (p < 4)
-    return { category: "good" as const, label: "Good", color: "#d6ecff", textColor: "#133a52" };
-  return { category: "excellent" as const, label: "Excellent", color: "#0f5f2a", textColor: "#ffffff" };
+    return { category: "good" as const, label: "Good", range: "2 – <3", color: "#d6ecff", textColor: "#133a52" };
+  return { category: "excellent" as const, label: "Excellent", range: "3+", color: "#0f5f2a", textColor: "#ffffff" };
 }
 
 export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) => {
@@ -64,9 +63,12 @@ export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) 
         <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>
             Prediction {playerName ? `– ${playerName}` : ""}
         </h2>
+        <div style={metaStyle}>
+            Raw pts: {points != null ? (Math.round(points * 100) / 100) : "—"}
+        </div>
         <div style={rowStyle}>
             <span style={labelStyle}>Performance:</span>
-            <span>{perf.label}</span>
+            <span>{perf.label} ({perf.range})</span>
         </div>
         <div style={rowStyle}>
             <span style={labelStyle}>Minutes:</span>
@@ -74,7 +76,7 @@ export const Prediction: React.FC<PredictionProps> = ({ playerId, playerName }) 
         </div>
         </div>
         <footer style={footerStyle}>
-        <p>The forecast is on scale (Bad → Okay → Good → Excellent)</p>
+        <p>Prediction uses a compact performance scale (Bad → Excellent). It is for comparing players, not exact FPL match points. Higher = stronger expected gameweek.</p>
         </footer>
     </div>
   );

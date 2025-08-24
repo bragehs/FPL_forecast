@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { PlayerSearch } from "./PlayerSearch";
 import { Prediction } from "./Prediction";
 import "./App.css";
@@ -14,7 +14,7 @@ function App() {
     <div className="outer">
       <h1 style={{ margin: 0 }}>FPL Points Predictor</h1>
       <p className="subhead">
-        Points forecast based on past performances. Search for and select a player to see their performance forecast for the next gameweek.
+        Points prediction based on past performances. Select a player to see their expected performance for the next gameweek.
       </p>
       <div className="content-row">
         <div className="left-col">
