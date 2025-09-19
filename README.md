@@ -40,3 +40,6 @@ could try separate model for each position, so the model does not have to learn 
 
 ### use LightGBM or XGBoost
 i tried XGBoost but did not do proper tuning, with proper tuning it would probably be at least as good as LSTM. could also give more insights into important features
+
+### proper optimization
+implement optimization that actually could be implemented in a whole fantasy season without using so many transfers. 
