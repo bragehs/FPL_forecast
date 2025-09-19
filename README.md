@@ -29,3 +29,14 @@ This model is probably best used as a tool for a human to actually play FPL, ins
 I have also created an endpoint on huggingFace which returns a prediction for a player for the next gameweek when requesting with player id. 
 
 This endpoint is used to display predictions for selected players on the website https://fpl-forecast.vercel.app/
+
+## TODO
+
+### monte carlo
+even though the model is performing decently, its quite annoying that the output range is mostly between 0-4. I think its not smart to just output the raw total points like i am doing now. I could instead output all variables which determine points (goals, assists, clean sheet etc) and then do monte carlo simulations of poisson distributions to hopefully get more variety of points. Perhaps the average would still be quite low, but there is at least more potential to display more meaning forecasts. 
+
+### separate model for each position
+could try separate model for each position, so the model does not have to learn the points differences on its own.
+
+### use LightGBM or XGBoost
+i tried XGBoost but did not do proper tuning, with proper tuning it would probably be at least as good as LSTM. could also give more insights into important features
